@@ -84,6 +84,7 @@ def parse_statistics(payload: dict[str, Any]) -> dict[str, Any]:
     bal = fin.get("balance_sheet") or {}
     stock = st.get("stock_statistics") or {}
     px = st.get("stock_price_summary") or {}
+    splits = st.get("dividends_and_splits") or {}
     out = {
         "shortName": (payload.get("meta") or {}).get("name"),
         "marketCap": _num(val.get("market_capitalization")),
@@ -97,6 +98,9 @@ def parse_statistics(payload: dict[str, Any]) -> dict[str, Any]:
         "shortRatio": _num(stock.get("short_ratio")),
         "fiftyTwoWeekHigh": _num(px.get("fifty_two_week_high")),
         "fiftyTwoWeekLow": _num(px.get("fifty_two_week_low")),
+        "twoHundredDayAverage": _num(px.get("day_200_ma")),
+        "lastSplitFactor": splits.get("last_split_factor") or None,
+        "lastSplitDate": str(splits["last_split_date"])[:10] if splits.get("last_split_date") else None,
     }
     return {k: v for k, v in out.items() if v is not None}
 

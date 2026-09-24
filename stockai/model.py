@@ -234,6 +234,37 @@ def fit_calibration(p: np.ndarray, y: np.ndarray, groups: np.ndarray, overlap: f
                        deff=float(deff), overall=float(y.mean()))
 
 
+def decision_backtest(p: np.ndarray, y: np.ndarray, months: np.ndarray, overlap: float = 1.0) -> dict[str, int]:
+    """Regula de decizie testată fără privit înainte: pentru fiecare an, recalibrarea și rata „de obicei” vin doar din
+    anii de test anteriori. BUY dacă tot intervalul de 90% e peste medie, SELL dacă e tot sub, altfel HOLD."""
+    years = np.array([m[:4] for m in months])
+    # Media lunii respective, ca un BUY dat într-o lună bună pentru toată piața să nu pară talent.
+    month_mean = pd.Series(y).groupby(months).transform("mean").to_numpy()
+    out = {"buy": 0, "buy_hit": 0, "buy_same_month": 0.0, "sell": 0, "sell_hit": 0, "sell_same_month": 0.0,
+           "hold": 0, "total": 0, "up": 0}
+    for year in sorted(set(years))[1:]:
+        past, now = years < year, years == year
+        if past.sum() < 200:
+            continue
+        cal = fit_calibration(p[past], y[past], months[past], overlap)
+        base = float(y[past].mean())
+        pc, lo, hi = cal.apply(p[now])
+        yy = y[now].astype(int)
+        mm = month_mean[now]
+        # Fără un model care a ajutat sigur în anii dinainte, nicio decizie BUY/SELL.
+        buy, sell = (lo > base) & cal.helps, (hi < base) & cal.helps
+        out["buy"] += int(buy.sum())
+        out["buy_hit"] += int(yy[buy].sum())
+        out["buy_same_month"] += float(mm[buy].sum())
+        out["sell"] += int(sell.sum())
+        out["sell_hit"] += int((1 - yy[sell]).sum())
+        out["sell_same_month"] += float((1 - mm[sell]).sum())
+        out["hold"] += int((~buy & ~sell).sum())
+        out["total"] += int(len(yy))
+        out["up"] += int(yy.sum())
+    return out
+
+
 class ProbabilityModel:
     def __init__(self, horizon: int = 20, target: str = "up", C: float | None = None) -> None:
         self.horizon = horizon
@@ -307,6 +338,7 @@ class BacktestReport:
     top_decile_up: float = float("nan")
     overall_up: float = float("nan")
     recalibration: Calibration | None = None
+    decisions: dict[str, int] = field(default_factory=dict)  # testul regulii de decizie, vezi decision_backtest
 
     @property
     def skill(self) -> float:
@@ -339,6 +371,13 @@ class BacktestReport:
             )
         good = sum(1 for y in self.years if y["auc"] > 0.5)
         lines.append(f"  Consecvență: ordinea dată de model a fost mai bună decât întâmplarea în {good} din {len(self.years)} ani.")
+        d = self.decisions
+        if d.get("total"):
+            buy = (f"BUY de {d['buy']} ori, corect în {d['buy_hit'] / d['buy']:.0%}"
+                   f" (în aceleași luni, media {d['buy_same_month'] / d['buy']:.0%})" if d["buy"] else "niciun BUY sigur")
+            sell = (f"SELL de {d['sell']} ori, corect în {d['sell_hit'] / d['sell']:.0%}"
+                    f" (în aceleași luni, media {d['sell_same_month'] / d['sell']:.0%})" if d["sell"] else "niciun SELL sigur")
+            lines.append(f"  Regula de decizie, an de an fără privit înainte: {buy}; {sell}; în rest HOLD.")
         lines.append("  Calibrare brută (probabilitate prezisă → cât de des s-a întâmplat):")
         for c in self.calibration:
             lines.append(f"    {c['predicted']:.1%} → {c['actual']:.1%}  (n={c['n']})")
@@ -391,6 +430,7 @@ def walk_forward(data: pd.DataFrame, horizon: int = 20, min_train_years: int = 3
     report.auc = float(roc_auc_score(y, p)) if len(set(y)) > 1 else float("nan")
     report.overall_up = float(y.mean())
     report.recalibration = fit_calibration(p, y, g, overlap)
+    report.decisions = decision_backtest(p, y, g, overlap)
     edges = np.quantile(p, np.linspace(0, 1, 11))
     bins = np.clip(np.searchsorted(edges, p, side="right") - 1, 0, 9)
     for k in range(10):

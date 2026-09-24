@@ -481,6 +481,8 @@ td .hint { color: var(--muted); }
 .checks .g[data-ok="1"] { color: var(--buy); }
 .checks .g[data-ok="0"] { color: var(--sell); }
 .checks small { grid-column: 2; color: var(--muted); font-size: 13px; }
+.why-line { grid-column: 1 / -1; font-size: 14px; color: var(--ink-2); max-width: 90ch; }
+.why-line strong { color: var(--ink); }
 .warn { grid-column: 1 / -1; padding: 8px 12px; border-radius: 8px; background: var(--hold-soft); color: var(--ink); font-size: 14px; }
 .warn strong { color: var(--hold); }
 .sure.down { color: var(--sell); }
@@ -857,7 +859,8 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     const st = obj && obj.statistics;
     if (!st) return null;
     const val = st.valuations_metrics || {}, fin_ = st.financials || {}, inc = fin_.income_statement || {},
-      bal = fin_.balance_sheet || {}, stock = st.stock_statistics || {}, px = st.stock_price_summary || {}, meta = obj.meta || {};
+      bal = fin_.balance_sheet || {}, stock = st.stock_statistics || {}, px = st.stock_price_summary || {}, meta = obj.meta || {},
+      ds = st.dividends_and_splits || {};
     return {
       name: typeof meta.name === "string" ? meta.name : null,
       exchange: typeof meta.exchange === "string" ? meta.exchange : null,
@@ -877,6 +880,9 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       beta: num(px.beta),
       high52: num(px.fifty_two_week_high),
       low52: num(px.fifty_two_week_low),
+      sma200: num(px.day_200_ma),
+      splitFactor: typeof ds.last_split_factor === "string" ? ds.last_split_factor : null,
+      splitDate: typeof ds.last_split_date === "string" ? ds.last_split_date.slice(0, 10) : null,
       marketCap: num(val.market_capitalization),
     };
   }
@@ -1461,6 +1467,23 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       if (!match) penalty += 15;
       checks.push({ ok: match, label: "Sursele se potrivesc", detail: `maximul pe 52 de săptămâni: ${money(hi)} în serie, ${money(overview.high52)} raportat${match ? "" : " (diferență mare: prețuri posibil neajustate)"}` });
     }
+    // Media pe 200 de zile calculată din serie față de cea raportată de Twelve Data.
+    if (overview && fin(overview.sma200) && overview.sma200 > 0 && daily && n >= 200) {
+      const ours = bars.slice(-200).reduce((acc, b) => acc + b.c, 0) / 200, ratio = ours / overview.sma200;
+      const match = Math.abs(ratio - 1) <= 0.03;
+      if (!match) penalty += 10;
+      checks.push({ ok: match, label: "Media pe 200 de zile se potrivește", detail: `${money(ours)} în serie, ${money(overview.sma200)} raportat` });
+    }
+    // Ultimul split raportat: în ziua lui, o serie neajustată ar sări exact cu raportul split-ului.
+    const sm = overview && overview.splitFactor && /(\d+(?:\.\d+)?)\s*-\s*for\s*-\s*(\d+(?:\.\d+)?)/i.exec(overview.splitFactor);
+    if (sm && overview.splitDate && daily && overview.splitDate > bars[0].d && overview.splitDate <= bars[n - 1].d) {
+      const k = Number(sm[1]) / Number(sm[2]), at = bars.findIndex((b) => b.d >= overview.splitDate);
+      if (k > 0 && k !== 1 && at > 0) {
+        const unadjusted = Math.abs(Math.log((bars[at].c / bars[at - 1].c) * k)) < 0.1;
+        if (unadjusted) { penalty += 40; if (!suspect.includes(at)) suspect.push(at); }
+        checks.push({ ok: !unadjusted, label: "Ultimul split e ajustat", detail: `${overview.splitFactor.replace(/ split$/i, "")} pe ${fmtDate(overview.splitDate)}: ${unadjusted ? "prețurile dinainte NU sunt ajustate" : "prețurile dinainte sunt ajustate corect"}` });
+      }
+    }
     if (extreme) checks.push({ ok: true, label: "Mișcări extreme", detail: `${extreme} ${extreme === 1 ? "zi" : "zile"} cu mișcări de peste 45% (păstrate: par reale, nu split-uri)` });
 
     const score = Math.max(0, 100 - penalty);
@@ -1759,6 +1782,30 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     return out;
   }
 
+  // Test al regulii de decizie, fără privit înainte: pentru fiecare an, recalibrarea și rata „de obicei” vin doar din
+  // anii de test anteriori; BUY dacă tot intervalul e peste medie, SELL dacă e tot sub. Cât de des au avut dreptate?
+  // Comparăm și cu media din aceleași luni: altfel un BUY dat într-o lună bună pentru toată piața ar părea talent.
+  function decisionBacktest(oos) {
+    const years = [...new Set(oos.map((o) => o.d.slice(0, 4)))].sort();
+    const monthUp = new Map();
+    for (const o of oos) { const k = o.d.slice(0, 7), v = monthUp.get(k) || [0, 0]; v[0] += o.y; v[1]++; monthUp.set(k, v); }
+    const sameMonth = (o) => { const v = monthUp.get(o.d.slice(0, 7)); return v[0] / v[1]; };
+    const out = { buy: 0, buyHit: 0, buyBase: 0, sell: 0, sellHit: 0, sellBase: 0, hold: 0, total: 0, up: 0 };
+    for (const Y of years.slice(1)) {
+      const past = oos.filter((o) => o.d.slice(0, 4) < Y), now = oos.filter((o) => o.d.slice(0, 4) === Y);
+      if (past.length < 200) continue;
+      const cal = platt(past, designEffect(past)), base = mean(past.map((o) => o.y)), helps = calHelps(cal);
+      for (const o of now) {
+        const c = calibrate(cal, o.p);
+        out.total++; out.up += o.y;
+        if (helps && c.lo > base) { out.buy++; out.buyHit += o.y; out.buyBase += sameMonth(o); }
+        else if (helps && c.hi < base) { out.sell++; out.sellHit += 1 - o.y; out.sellBase += 1 - sameMonth(o); }
+        else out.hold++;
+      }
+    }
+    return out;
+  }
+
   // docs: datele de antrenare ale fiecărei acțiuni; target: "up" (crește) sau "beat" (bate S&P 500).
   function buildModel(docs, target) {
     const rows = [], stocks = new Set();
@@ -1787,6 +1834,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     return {
       ...info,
       ready: true,
+      decisions: decisionBacktest(wf.oos),
       final, cal, deff,
       n: wf.oos.length,
       nEff: wf.oos.length / deff,
@@ -1801,15 +1849,18 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     };
   }
 
+  // A ajutat modelul în anii nevăzuți? Da, dacă ordinea dată de el a contat sigur statistic.
+  const calHelps = (cal) => !!(cal && cal.b > 0 && cal.rawB > Z90 * cal.seB);
+  const modelHelps = (m) => !!(m && m.ready && calHelps(m.cal));
+
+  // „Sigur statistic” doar dacă (1) modelul a ajutat sigur în anii de test și (2) tot intervalul e de aceeași parte a mediei.
   function modelPredict(m, raw) {
     if (!m || !m.ready || !Array.isArray(raw) || raw.length !== RAW_N || !raw.every(fin)) return null;
     const c = calibrate(m.cal, m.final.predict(design(raw)));
-    return { ...c, base: m.overall, edge: c.p - m.overall, sure: c.lo > m.overall ? "up" : c.hi < m.overall ? "down" : null };
+    const sure = !modelHelps(m) ? null : c.lo > m.overall ? "up" : c.hi < m.overall ? "down" : null;
+    return { ...c, base: m.overall, edge: c.p - m.overall, sure };
   }
   /* model-core:end */
-
-  // A ajutat modelul în anii nevăzuți? Da, dacă ordinea dată de el a contat sigur statistic.
-  const modelHelps = (m) => !!(m && m.ready && m.cal.b > 0 && m.cal.rawB > Z90 * m.cal.seB);
   const TARGETS = {
     up: { label: "Crește", what: "șanse de creștere", verb: "au urcat", base: "au urcat" },
     beat: { label: "Bate S&P 500", what: "șanse să bată S&P 500", verb: "au bătut S&P 500", base: "au bătut S&P 500" },
@@ -1874,6 +1925,76 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     return out;
   }
 
+  // ---------- decizia ----------
+  // Ca la un desk profesionist, decizia pornește de la dovezi verificate:
+  // 1. statistica decide direcția: BUY doar dacă tot intervalul de 90% e peste rata obișnuită, SELL doar dacă e tot sub;
+  // 2. regulile (scorul compus, cu ponderi neverificate) confirmă sau blochează, dar nu pot crea singure un BUY/SELL;
+  // 3. pe date slabe nu se decide nimic; încrederea scade înaintea raportului trimestrial și fără modelul verificat;
+  // 4. Claude arbitrează doar ce e neclar și trece prin verificări (vezi withClaude).
+  const STRONG_RULE = 40;
+  const LEVELS = ["low", "medium", "high"];
+  const lowerConf = (c) => LEVELS[Math.max(0, LEVELS.indexOf(c) - 1)];
+  function statVerdict(est) {
+    if (!est) return "none";
+    if (est.sure === "up") return "up";
+    if (est.sure === "down") return "down";
+    const edge = est.p - est.base;
+    return edge >= CFG.minEdge ? "leanUp" : edge <= -CFG.minEdge ? "leanDown" : "none";
+  }
+  function baseDecision(est, rule, composite, qualityGrade, earningsDays) {
+    const why = [], ask = [];
+    if (qualityGrade === "slabă") return { d: "HOLD", conf: "low", why: ["datele de preț au probleme: nu decidem pe date nesigure"], ask };
+    if (!est) return { d: "HOLD", conf: "low", why: ["prea puține date pentru o estimare statistică"], ask: ["prea puține date pentru o estimare statistică"] };
+    const sv = statVerdict(est), iv = `${pct(est.lo)}–${pct(est.hi)} față de ${pct(est.base)} de obicei`;
+    let d = "HOLD", conf = "low";
+    if (sv === "up" || sv === "down") {
+      const action = sv === "up" ? "BUY" : "SELL", opposite = sv === "up" ? "SELL" : "BUY", word = sv === "up" ? "peste" : "sub";
+      if (rule === opposite) {
+        why.push(`statistica e sigur ${word} medie (${iv}), dar regulile spun ${opposite}`);
+        ask.push(`statistica e sigur ${word} medie (${iv}), dar regulile spun ${opposite} (scor ${sscore(composite)})`);
+      } else {
+        d = action;
+        const margin = sv === "up" ? est.lo - est.base : est.base - est.hi;
+        conf = rule === action && margin >= 0.02 ? "high" : "medium";
+        why.push(`statistica e sigur ${word} medie (${iv})`, rule === action ? "regulile sunt de acord" : "regulile sunt neutre");
+      }
+    } else if (sv === "leanUp" || sv === "leanDown") {
+      const dir = sv === "leanUp" ? "BUY" : "SELL";
+      why.push(`statistica înclină spre ${sv === "leanUp" ? "creștere" : "scădere"} (${pct(est.p)}, interval ${iv}), dar nu e sigură`);
+      if (rule === dir) ask.push(`statistica înclină spre ${dir} și regulile sunt de acord, dar intervalul include media (${iv})`);
+      else if (rule !== "HOLD") ask.push(`statistica înclină spre ${dir}, regulile spun ${rule}`);
+    } else {
+      why.push(`statistica nu arată un avantaj (${pct(est.p)}, interval ${iv})`);
+      if (Math.abs(composite) >= STRONG_RULE) ask.push(`regulile dau un semnal puternic (${sscore(composite)}), dar statistica nu arată niciun avantaj (${iv})`);
+    }
+    if (d !== "HOLD") {
+      if (fin(earningsDays) && earningsDays >= 0 && earningsDays <= 28) { conf = lowerConf(conf); why.push(`raport trimestrial în ${earningsDays} zile: încredere mai mică`); }
+      if (est.src !== "model") { conf = lowerConf(conf); why.push("estimarea vine doar din istoricul acțiunii, nu din modelul verificat"); }
+    }
+    return { d, conf, why, ask };
+  }
+  // Opinia lui Claude, cu verificări: decizia trebuie să se potrivească cu propria probabilitate, nu poate întoarce
+  // o statistică sigură, iar dacă în predicțiile verificate a greșit mai des decât statistica, decide statistica.
+  function claudeWorse() {
+    const t = trackStats(), stat = [t.model, t.stat].filter((x) => x && x.n >= 30).sort((x, y) => y.skill - x.skill)[0];
+    return !!(t.claude && t.claude.n >= 30 && stat && t.claude.skill < stat.skill - 0.01);
+  }
+  function withClaude(base, v, est, qualityGrade) {
+    if (!v) return { ...base, by: "statistică", v: null };
+    if (claudeWorse()) return { ...base, by: "statistică", v, why: [...base.why, "în predicțiile verificate, Claude a greșit mai des decât statistica: decide statistica"] };
+    let d = v.decision, conf = v.confidence;
+    const why = [...base.why], p = fin(v.probability_up_pct) ? v.probability_up_pct / 100 : null, b = est ? est.base : 0.5;
+    if (d === "BUY" && !(p != null && p >= b + CFG.minEdge)) { why.push(`Claude a spus BUY, dar probabilitatea lui (${p != null ? pct(p) : "lipsă"}) nu e peste ${pct(b)} de obicei: HOLD`); d = "HOLD"; }
+    if (d === "SELL" && !(p != null && p <= b - CFG.minEdge)) { why.push(`Claude a spus SELL, dar probabilitatea lui (${p != null ? pct(p) : "lipsă"}) nu e sub ${pct(b)} de obicei: HOLD`); d = "HOLD"; }
+    const sv = statVerdict(est);
+    if ((sv === "up" && d === "SELL") || (sv === "down" && d === "BUY")) { why.push("Claude contrazice o statistică sigură: HOLD"); d = "HOLD"; }
+    if (est && p != null && (p < est.lo - 0.05 || p > est.hi + 0.05)) { why.push(`probabilitatea lui Claude (${pct(p)}) iese mult din intervalul statistic: încredere scăzută`); conf = "low"; }
+    if (qualityGrade === "slabă") d = "HOLD";
+    return { d, conf, why, ask: base.ask, by: "Claude", v };
+  }
+  // Pentru clasament și tabel: aceeași regulă, doar din estimare (fără componentele analizei complete).
+  const statAction = (h) => (!h ? "HOLD" : h.sure === "up" ? "BUY" : h.sure === "down" ? "SELL" : "HOLD");
+
   function technical(weeks, f) {
     if (weeks.length < f.minBars) throw new AvError("short_history", "istoric prea scurt");
     const ind = indicators(weeks, f);
@@ -1910,9 +2031,11 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     const x = f.key === "D" && spyData && !etf(entry.ticker) ? rawNow(entry.weeks, ind, spyData) : null;
     const model = modelFor(x);
     const est = bestEstimate(model, honest);
-    const reasons = findAmbiguity(scores, rule, est);
-    if (quality.grade === "slabă") reasons.push(`datele de preț au probleme (${quality.checks.filter((c) => !c.ok).map((c) => c.label.toLowerCase()).join(", ")})`);
-    return { ind, i, f, scores, rule, odds, honest, quality, x, model, est, events, reasons };
+    const decision = baseDecision(est, rule, scores.composite, quality.grade, events.next ? events.next.days : null);
+    const reasons = [...decision.ask];
+    // Când statistica cere o acțiune, componente care se contrazic puternic merită o a doua privire (știrile pot explica).
+    if (decision.d !== "HOLD") reasons.push(...findAmbiguity(scores, rule, est).filter((r) => r.includes("contrazice")));
+    return { ind, i, f, scores, rule, odds, honest, quality, x, model, est, events, decision, reasons };
   }
 
   // Modelul se reface când se adaugă acțiuni scanate; analiza deschisă primește noile procente.
@@ -1922,6 +2045,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     if (!a.x && a.f.key === "D" && spyData && !etf(entry.ticker)) a.x = rawNow(entry.weeks, a.ind, spyData);
     a.model = modelFor(a.x);
     a.est = bestEstimate(a.model, a.honest);
+    a.decision = baseDecision(a.est, a.rule, a.scores.composite, a.quality.grade, a.events.next ? a.events.next.days : null);
     renderVerdict(entry, a);
     renderModel(a);
   }
@@ -2379,6 +2503,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       },
       scores_minus100_to_100: Object.fromEntries(Object.entries(scores).map(([k, v]) => [k, r1(v)])),
       rule_based_decision: rule,
+      evidence_based_decision: { action: a.decision.d, confidence: a.decision.conf, why: a.decision.why },
       statistical_estimate: a.est ? {
         source: a.est.src === "model"
           ? "model învățat din toate acțiunile scanate, verificat doar pe ani nevăzuți și recalibrat pe acele rezultate"
@@ -2437,6 +2562,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       "Decide BUY, SELL sau HOLD pentru orizontul indicat și estimează probabilitatea ca prețul să fie mai mare la finalul orizontului.",
       "",
       "Reguli:",
+      "- evidence_based_decision e decizia sistemului pe baza dovezilor. Decizia ta finală e verificată automat: BUY cere o probabilitate cel puțin 3 puncte peste rata de bază, SELL cel puțin 3 sub, și nu poți întoarce o statistică sigură.",
       "- Pornește de la estimarea statistică (statistical_estimate) și intervalul ei de 90%. Rămâi în interval, cu excepția cazului în care ai motive puternice și concrete, pe care le spui explicit.",
       "- Majoritatea semnalelor publice au efecte mici; o probabilitate peste 65% sau sub 40% pe 4 săptămâni e rară și cere dovezi excepționale.",
       "- model_validation arată cât a ajutat modelul pe ani pe care nu i-a văzut. Dacă ranking_helped_significantly e false, diferențele față de medie sunt probabil zgomot.",
@@ -2615,7 +2741,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
         return el("button", { class: "card", type: "button", onclick: () => openStock(s.ticker),
           "aria-label": `${s.ticker} ${nameOf(s.ticker)}: ${pct(h.p)} ${TARGETS[cur].what} în 4 săptămâni, interval ${pct(h.lo)}–${pct(h.hi)}` },
           el("div", { class: "card-top" }, el("span", { class: "card-t", text: s.ticker }),
-            s.full ? sigChip(s.full.decision, `analiza completă (${s.full.by})`) : sigChip(s.rule, "semnal tehnic")),
+            s.full ? sigChip(s.full.decision, `analiza completă (${s.full.by})`) : sigChip(statAction(scanEstimates(s).up), "din statistică: BUY/SELL doar dacă e sigur statistic")),
           el("span", { class: "card-nm", text: nameOf(s.ticker) || " " }),
           el("span", { class: "card-p", text: pct(h.p) }),
           el("span", { class: "card-sub", text: `±${half} pp · de obicei ${pct(h.base)}` }),
@@ -2692,7 +2818,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
         const h = e.up;
         const ok = !!h;
         const signal = s && s.full ? sigChip(s.full.decision, `analiza completă (${s.full.by})`)
-          : ok ? sigChip(s.rule, "semnal tehnic") : null;
+          : ok ? sigChip(statAction(h), "din statistică: BUY/SELL doar dacă e sigur statistic") : null;
         const canScan = !scanJob && (!s || daysAgo(s.scannedAt) >= CFG.staleDays);
         return el("tr", { onclick: () => openStock(d.ticker) },
           el("td", null, el("button", { class: "linkbtn", type: "button", text: d.ticker,
@@ -2863,7 +2989,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
   function finalDecisionFor(entry, a) {
     const v = entry === state.entry && state.claude.status === "done" ? state.claude.verdict
       : entry.claude && entry.claude.verdict ? entry.claude.verdict : null;
-    return v ? { d: v.decision, by: "Claude", v } : { d: a.rule, by: "reguli", v: null };
+    return withClaude(a.decision, v, a.est, a.quality.grade);
   }
 
   function renderVerdict(entry, a) {
@@ -2876,9 +3002,9 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       el("div", { class: "stock-sub", text: [name, o && o.exchange, a.f.source].filter(Boolean).join(" · ") }),
       el("div", { class: "stock-price" }, money(last.c), " ", el("small", { text: `${(o && o.currency) || ""} · ${a.f.key === "D" ? "închidere" : "săptămâna"} ${fmtDate(last.d)}`.trim() })),
     );
-    const byText = fd.by === "Claude"
-      ? `decis de Claude · încredere ${CONF[fd.v.confidence]}`
-      : state.claude.status === "thinking" ? "decizia regulilor · Claude analizează" : "decis de reguli";
+    const byText = state.claude.status === "thinking" && fd.by !== "Claude"
+      ? "decizia statisticii · Claude analizează"
+      : `decis de ${fd.by} · încredere ${CONF[fd.conf]}`;
     const dec = el("div", { class: "decision", "data-d": fd.d },
       el("div", { class: "decision-word" }, el("span", { class: "glyph", "aria-hidden": "true", text: GLYPH[fd.d] }), fd.d),
       el("div", { class: "decision-by", text: byText }),
@@ -2905,7 +3031,8 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       `pe ${fmtDate(nx.date)} (${nx.days === 0 ? "azi" : nx.days === 1 ? "mâine" : `în ${nx.days} zile`}), în perioada estimată. În ziua raportului prețul poate sări mult, în orice direcție, iar statistica nu știe rezultatul.`) : null;
     const qWarn = a.quality.grade === "slabă" ? el("p", { class: "warn" }, el("strong", { text: "Date cu probleme: " }),
       `${a.quality.checks.filter((c) => !c.ok).map((c) => c.label.toLowerCase()).join(", ")}. Tratează procentele cu prudență.`) : null;
-    $("verdict").replaceChildren(nameBlock, dec, nums, ...(qWarn ? [qWarn] : []), ...(warn ? [warn] : []));
+    const whyLine = fd.why.length ? el("p", { class: "why-line" }, el("strong", { text: "De ce: " }), fd.why.join(" · ")) : null;
+    $("verdict").replaceChildren(nameBlock, dec, nums, ...(whyLine ? [whyLine] : []), ...(qWarn ? [qWarn] : []), ...(warn ? [warn] : []));
   }
 
   // ----- chart -----
@@ -3077,6 +3204,16 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       el("div", { class: "range-scale", "aria-hidden": "true" }, el("span", { text: "30%" }), el("span", { text: "55%" }), el("span", { text: "80%" })));
   }
 
+  // Cum s-ar fi descurcat regula de decizie în anii de test (fiecare an decis doar cu ce se știa înainte).
+  function decisionText(t, k) {
+    if (!t.total) return "";
+    const what = k === "up" ? ["a urcat", "a scăzut", "urcă"] : ["a bătut S&P 500", "a rămas sub S&P 500", "bat S&P 500"];
+    const parts = [];
+    parts.push(t.buy ? `BUY de ${t.buy} ori: ${what[0]} în ${pct(t.buyHit / t.buy)} (în aceleași luni, media: ${pct(t.buyBase / t.buy)})` : "niciun BUY sigur");
+    parts.push(t.sell ? `SELL de ${t.sell} ori: ${what[1]} în ${pct(t.sellHit / t.sell)} (în aceleași luni, media: ${pct(t.sellBase / t.sell)})` : "niciun SELL sigur");
+    return `Regula de decizie pe ani nevăzuți, fiecare an decis doar cu ce se știa înainte (${TARGETS[k].label}): ${parts.join("; ")}; în rest HOLD.`;
+  }
+
   // Ce a rămas în afara modelului și de ce (igiena datelor, la vedere).
   function excludedText() {
     const poor = [], twins = [];
@@ -3138,7 +3275,8 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
         const ys = models[k].years, good = ys.filter((y) => y.auc > 0.5).length;
         return `${TARGETS[k].label}: ordinea dată de model a fost mai bună decât întâmplarea în ${good} din ${ys.length} ani.`;
       }).join(" ") + " Un model de încredere ar trebui să ajute în majoritatea anilor, nu doar într-unul bun." }),
-      el("p", { class: "note", text: "Procentele de sus sunt recalibrate pe aceste rezultate: dacă ordinea dată de model nu a contat sigur, ele rămân aproape de medie." })));
+      el("p", { class: "note", text: "Procentele de sus sunt recalibrate pe aceste rezultate: dacă ordinea dată de model nu a contat sigur, ele rămân aproape de medie." }),
+      el("p", { class: "note", text: ["up", "beat"].filter((k) => models[k] && models[k].ready && models[k].decisions).map((k) => decisionText(models[k].decisions, k)).join(" ") })));
     const mt = models[curTarget()];
     const top = mt.coefs.filter((c) => Math.abs(c.w) >= 0.01).slice(0, 5);
     if (top.length) {
@@ -3260,10 +3398,10 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     const a = state.a;
     const kids = [];
     if (a.reasons.length) {
-      kids.push(el("p", { class: "note", text: "Regulile nu sunt sigure:" }),
+      kids.push(el("p", { class: "note", text: "E neclar, de aceea e întrebat Claude:" }),
         el("ul", { class: "reasons" }, a.reasons.map((r) => el("li", { text: r }))));
     } else if (c.status !== "done" && c.status !== "thinking") {
-      kids.push(el("p", { text: "Semnalul regulilor e clar, așa că Claude nu a fost consultat." }));
+      kids.push(el("p", { text: "Decizia e clară (statistica și regulile nu se contrazic), așa că Claude nu a fost consultat." }));
     }
     if (c.status === "thinking") {
       kids.push(el("div", { class: "thinking" }, el("span", { class: "spinner", "aria-hidden": "true" }), el("span", { text: `Claude analizează… ${c.elapsed || 0} s` }),

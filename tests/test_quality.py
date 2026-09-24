@@ -92,3 +92,27 @@ def test_partial_bar_is_dropped_until_the_new_york_close():
     assert len(drop_partial_bar(px, after)) == len(px)
     assert len(drop_partial_bar(px, datetime(2026, 9, 25, 10, 0, tzinfo=NEW_YORK))) == len(px)
     assert np.isclose(drop_partial_bar(px, before)["Close"].iloc[-1], px["Close"].iloc[-2])
+
+
+def test_cross_checks_with_reported_200_day_average_and_last_split():
+    from stockai.sources.twelvedata import parse_statistics
+
+    # Forma reală a răspunsului Twelve Data (AAPL), doar câmpurile folosite aici.
+    stats = parse_statistics({"meta": {"name": "Apple Inc."}, "statistics": {
+        "stock_price_summary": {"fifty_two_week_high": 345.34, "day_200_ma": 286.60516},
+        "dividends_and_splits": {"last_split_factor": "4-for-1 split", "last_split_date": "2020-08-31"}}})
+    assert stats["twoHundredDayAverage"] == 286.60516
+    assert stats["lastSplitFactor"] == "4-for-1 split" and stats["lastSplitDate"] == "2020-08-31"
+
+    px = make_prices(n=2600)
+    sma = float(px["Close"].iloc[-200:].mean())
+    assert check_prices(px, today=TODAY, two_hundred_day_average=sma * 1.01).grade == "bună"
+    assert "Media pe 200 de zile se potrivește" in failed(check_prices(px, today=TODAY, two_hundred_day_average=sma * 1.2))
+
+    split_day = px.index[-900]
+    adjusted = check_prices(px, today=TODAY, last_split=("4-for-1 split", str(split_day.date())))
+    assert not adjusted.failed and any(c.label == "Ultimul split e ajustat" and c.ok for c in adjusted.checks)
+    raw = px.copy()
+    raw.loc[raw.index < split_day, "Close"] *= 4
+    q = check_prices(raw, today=TODAY, last_split=("4-for-1 split", str(split_day.date())))
+    assert "Ultimul split e ajustat" in failed(q) and split_day in q.suspect

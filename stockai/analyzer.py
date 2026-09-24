@@ -15,6 +15,7 @@ from .advisor import AdvisorError, ClaudeAdvisor, ClaudeVerdict
 from .calibration import HistoricalOdds, historical_odds, honest_estimate, model_estimate
 from .config import Settings
 from .data import DataError, DataProvider
+from .decision import Decision, base_decision, with_claude
 from .indicators import compute_all
 from .quality import check_prices
 from .scoring import (
@@ -54,14 +55,25 @@ class Recommendation:
     honest: dict[str, Any] | None = None
     claude: ClaudeVerdict | None = None
     claude_error: str | None = None
+    final: Decision | None = None  # decizia după reguli de dovezi și verificări (vezi decision.py)
 
     @property
     def decision(self) -> str:
+        if self.final:
+            return self.final.action
         return self.claude.decision if self.claude else self.rule_decision
 
     @property
     def decided_by(self) -> str:
+        if self.final:
+            return self.final.decided_by
         return "Claude" if self.claude else "reguli"
+
+    @property
+    def confidence(self) -> str | None:
+        if self.final:
+            return self.final.confidence
+        return self.claude.confidence if self.claude else None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -70,6 +82,8 @@ class Recommendation:
             "price": self.price,
             "decision": self.decision,
             "decided_by": self.decided_by,
+            "confidence": self.confidence,
+            "why": self.final.why if self.final else [],
             "rule_decision": self.rule_decision,
             "scores": self.scores,
             "historical_odds": asdict(self.odds) if self.odds else None,
@@ -158,6 +172,7 @@ class Analyzer:
         claude_mode: ClaudeMode = "auto",
         model: Any | None = None,
         beat_model: Any | None = None,
+        claude_worse: bool = False,
     ) -> None:
         self.data = data
         self.settings = settings or Settings()
@@ -165,6 +180,8 @@ class Analyzer:
         self.claude_mode = claude_mode
         self.model = model
         self.beat_model = beat_model
+        # True când, în predicțiile verificate, Claude a greșit mai des decât statistica (vezi track.claude_worse).
+        self.claude_worse = claude_worse
 
     def _optional(self, name: str, *args: Any, **kwargs: Any) -> Any:
         """Surse opționale: dacă lipsesc sau dau eroare, analiza continuă fără ele."""
@@ -195,8 +212,10 @@ class Analyzer:
         macro_raw = self._optional("macro")
         upcoming = self._optional("next_earnings", ticker)
 
-        quality = check_prices(prices, today=date.today(),
-                               fifty_two_week_high=(fundamentals or {}).get("fiftyTwoWeekHigh"))
+        f = fundamentals or {}
+        quality = check_prices(prices, today=date.today(), fifty_two_week_high=f.get("fiftyTwoWeekHigh"),
+                               two_hundred_day_average=f.get("twoHundredDayAverage"),
+                               last_split=(f["lastSplitFactor"], f.get("lastSplitDate")) if f.get("lastSplitFactor") else None)
         extras = {
             "quality": quality.to_dict(),
             "market": market_signal(market_close),
@@ -238,12 +257,16 @@ class Analyzer:
             model=model_out,
             model_beat=beat_out,
             honest=honest,
-            ambiguity_reasons=find_ambiguity(scores, rule_decision, odds, s, model_out, honest),
         )
-        if quality.grade == "slabă":
-            rec.ambiguity_reasons.append(
-                "datele de preț au probleme (" + ", ".join(c.label.lower() for c in quality.failed) + ")"
-            )
+        nxt = extras.get("next_earnings")
+        base = base_decision(honest, rule_decision, scores["composite"], s.min_edge, quality.grade,
+                             nxt["days"] if nxt else None)
+        rec.final = base
+        rec.ambiguity_reasons = list(base.ask)
+        if base.action != "HOLD":
+            # Când statistica cere o acțiune, componente care se contrazic puternic merită o a doua privire.
+            rec.ambiguity_reasons += [r for r in find_ambiguity(scores, rule_decision, odds, s) if "contrazice" in r]
+        # Pe date slabe decizia e HOLD oricum: nu are rost să-l întrebăm pe Claude.
 
         ask = self.claude_mode == "always" or (self.claude_mode == "auto" and rec.ambiguity_reasons)
         if ask and self.advisor:
@@ -252,6 +275,8 @@ class Analyzer:
             except AdvisorError as exc:
                 log.warning("%s: %s", ticker, exc)
                 rec.claude_error = str(exc)
+        if rec.claude:
+            rec.final = with_claude(base, rec.claude, honest, s.min_edge, quality.grade, self.claude_worse)
         return rec
 
     def _model_probability(
@@ -313,6 +338,10 @@ class Analyzer:
             },
             "scores_-100_to_100": {k: None if v is None else round(v, 1) for k, v in rec.scores.items()},
             "rule_based_decision": rec.rule_decision,
+            "evidence_based_decision": (
+                {"action": rec.final.action, "confidence": rec.final.confidence, "why": rec.final.why}
+                if rec.final else None
+            ),
             "historical_odds_technical_only": (
                 {
                     "prob_up_when_score_similar": round(rec.odds.probability_up, 3),

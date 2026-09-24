@@ -85,6 +85,28 @@ def resolve(prices_for, path: Path | None = None, today: date | None = None) -> 
     return done
 
 
+def skill_by_source(path: Path | None = None) -> dict[str, tuple[int, float]]:
+    """Pentru fiecare sursă: câte predicții verificate și cât de mult a bătut „ca de obicei” (skill Brier)."""
+    rows = [r for r in _read(path or default_path()) if r["up"]]
+    out = {}
+    for source in {r["source"] for r in rows}:
+        done = [r for r in rows if r["source"] == source]
+        p = np.array([float(r["prob"]) for r in done])
+        b = np.array([float(r["base"]) for r in done])
+        y = np.array([int(r["up"]) for r in done])
+        brier, brier_base = float(np.mean((p - y) ** 2)), float(np.mean((b - y) ** 2))
+        out[source] = (len(done), 1 - brier / brier_base if brier_base else 0.0)
+    return out
+
+
+def claude_worse(path: Path | None = None, min_n: int = 30) -> bool:
+    """Claude a greșit sigur mai des decât statistica (după cel puțin `min_n` predicții verificate)?"""
+    skills = skill_by_source(path)
+    if "claude" not in skills or "stat" not in skills or skills["claude"][0] < min_n:
+        return False
+    return skills["claude"][1] < skills["stat"][1] - 0.01
+
+
 def report(path: Path | None = None) -> str:
     rows = _read(path or default_path())
     lines = []

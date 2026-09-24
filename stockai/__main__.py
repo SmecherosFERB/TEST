@@ -45,9 +45,11 @@ def render(rec: Recommendation) -> str:
     lines = [
         f"═══ {rec.ticker} · {rec.price:.2f} · {rec.as_of} ═══",
         f"Decizie: {rec.decision}  (decis de {rec.decided_by}"
-        + (f", încredere {CONFIDENCE[rec.claude.confidence]})" if rec.claude else ")"),
-        "Scoruri: " + " · ".join(f"{label} {fmt_score(s.get(key))}" for key, label in SCORE_LABELS),
+        + (f", încredere {CONFIDENCE[rec.confidence]})" if rec.confidence else ")"),
     ]
+    if rec.final and rec.final.why:
+        lines.append("De ce: " + "; ".join(rec.final.why))
+    lines.append("Scoruri: " + " · ".join(f"{label} {fmt_score(s.get(key))}" for key, label in SCORE_LABELS))
     for m, what in ((rec.model, "șanse de creștere"), (rec.model_beat, "șanse să bată S&P 500")):
         if not m:
             continue
@@ -236,8 +238,10 @@ def main(argv: list[str] | None = None) -> int:
     if model is None:
         print("Notă: modelul de probabilitate nu e antrenat încă (python -m stockai --train).", file=sys.stderr)
 
+    from . import track
+
     analyzer = Analyzer(MarketData(), settings=settings, advisor=advisor, claude_mode=claude_mode,
-                        model=model, beat_model=beat_model)
+                        model=model, beat_model=beat_model, claude_worse=track.claude_worse())
     results, failed = [], False
     for ticker in args.tickers:
         try:

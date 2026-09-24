@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, time
 from typing import Any
@@ -91,7 +92,10 @@ def check_prices(
     prices: pd.DataFrame,
     today: date | None = None,
     fifty_two_week_high: float | None = None,
+    two_hundred_day_average: float | None = None,
+    last_split: tuple[str, str] | None = None,
 ) -> Quality:
+    """`last_split`: (raport, dată), de ex. ("4-for-1 split", "2020-08-31"), din statisticile furnizorului."""
     today = today or date.today()
     close = prices["Close"].astype(float)
     volume = prices["Volume"].astype(float) if "Volume" in prices else pd.Series(0.0, index=close.index)
@@ -156,6 +160,29 @@ def check_prices(
         checks.append(Check(match, "Sursele se potrivesc",
                             f"maximul pe 52 de săptămâni: {hi:.2f} în serie, {fifty_two_week_high:.2f} raportat"
                             + ("" if match else " (diferență mare: prețuri posibil neajustate)")))
+    if two_hundred_day_average and two_hundred_day_average > 0 and n >= 200:
+        ours = float(close.iloc[-200:].mean())
+        match = abs(ours / two_hundred_day_average - 1) <= 0.03
+        if not match:
+            penalty += 10
+        checks.append(Check(match, "Media pe 200 de zile se potrivește",
+                            f"{ours:.2f} în serie, {two_hundred_day_average:.2f} raportat"))
+    if last_split:
+        factor, when = last_split
+        m = re.search(r"(\d+(?:\.\d+)?)\s*-\s*for\s*-\s*(\d+(?:\.\d+)?)", factor or "", re.IGNORECASE)
+        day = pd.Timestamp(when) if when else None
+        if m and day is not None and close.index[0] < day <= close.index[-1]:
+            k = float(m.group(1)) / float(m.group(2))
+            at = int(close.index.searchsorted(day))
+            if k > 0 and k != 1 and at > 0:
+                unadjusted = abs(np.log(close.iloc[at] / close.iloc[at - 1] * k)) < 0.1
+                if unadjusted:
+                    penalty += 40
+                    if close.index[at] not in suspect:
+                        suspect.append(close.index[at])
+                checks.append(Check(not unadjusted, "Ultimul split e ajustat",
+                                    f"{factor} pe {day.date()}: "
+                                    + ("prețurile dinainte NU sunt ajustate" if unadjusted else "prețurile dinainte sunt ajustate corect")))
     if extreme:
         checks.append(Check(True, "Mișcări extreme",
                             f"{extreme} zile cu mișcări de peste 45% (păstrate: par reale, nu split-uri)"))

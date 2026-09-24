@@ -17,7 +17,7 @@ S&P 500 + macro (VIX, credit) ───► scor piață ────────
                                                                   ▼
      procent istoric (situații tehnice similare)  +  model statistic pe ~113 acțiuni (crește? bate S&P 500?)
                                                                   │
-                                   semnal neclar? ──► Claude (a doua opinie, cu toate datele)
+                decizie din dovezi (vezi mai jos) ── neclar? ──► Claude (a doua opinie, cu verificări)
 ```
 
 | Componentă | Ce măsoară | Pondere |
@@ -29,7 +29,9 @@ S&P 500 + macro (VIX, credit) ───► scor piață ────────
 | Insideri | cumpărări pe piață ale conducerii în ultimele 180 de zile (mai mulți cumpărători = semnal mai puternic) | 10% |
 | Piață | trendul S&P 500 și stresul macro (VIX, prima de risc la obligațiuni, curba randamentelor) | 15% |
 
-Componentele fără date sunt omise, iar ponderile se recalculează. Scor compus peste +25 = BUY, sub -25 = SELL.
+Componentele fără date sunt omise, iar ponderile se recalculează. Scor compus peste +25 înseamnă că regulile spun BUY,
+sub -25 SELL. Ponderile nu sunt verificate, de aceea regulile doar confirmă sau blochează: decizia finală vine din
+dovezi (vezi „Cum se ia decizia”).
 
 ### Probabilitățile
 
@@ -87,21 +89,35 @@ Trei lucruri fac diferența între un procent care arată bine și unul pe care 
    `python -m stockai --evaluate`. Comparăm cu „ca de obicei” (eroarea Brier) și verificăm calibrarea: când
    am spus 60%, a urcat chiar în ~60% din cazuri? De la ~100 de predicții verificate, rezultatele devin de încredere.
 
-### Când intervine Claude
+### Cum se ia decizia BUY / SELL / HOLD
 
-Claude e consultat doar când regulile „nu știu ce să facă”:
+Decizia pornește de la dovezi verificate, nu de la un scor cu ponderi alese de mână (`stockai/decision.py`, aceeași
+logică și în pagină):
 
-- scorul compus e **neutru** (între -25 și +25);
-- componentele se **contrazic** (ex. tehnic +60, piață -50);
-- istoricul **nu are avantaj** sau are prea puține cazuri, ori **contrazice** regulile;
-- **modelul statistic contrazice** regulile.
+| Statistica (estimarea verificată) | Regulile (scorul compus) | Decizia | Claude |
+|---|---|---|---|
+| sigur peste medie (tot intervalul de 90% peste rata obișnuită) | BUY sau neutre | **BUY** (încredere ridicată dacă regulile sunt de acord) | nu |
+| sigur peste medie | SELL | HOLD | da: arbitrează conflictul |
+| sigur sub medie | SELL sau neutre | **SELL** | nu |
+| înclină într-o parte, dar intervalul include media | de acord | HOLD | da |
+| fără avantaj | semnal puternic (peste ±40) | HOLD | da |
+| fără avantaj | neutre | HOLD, decizie clară | nu |
 
-Claude primește și data următorului raport trimestrial: dacă acesta cade în următoarele 4 săptămâni, prețul poate sări
-mult în orice direcție, iar programul și pagina te avertizează.
+- **„Sigur statistic” cere și un model care a ajutat.** Modelul trebuie să fi ordonat acțiunile sigur mai bine decât
+  întâmplarea în anii de test; altfel nu dă BUY/SELL, oricât de sus ar fi un procent.
+- **Porți de siguranță:** pe date de calitate slabă decizia e HOLD. Încrederea scade înaintea unui raport
+  trimestrial în următoarele 4 săptămâni și când estimarea vine doar din istoricul acțiunii.
+- **Verificările lui Claude:** decizia lui trebuie să se potrivească cu propria probabilitate (BUY cere cel puțin
+  3 puncte peste rata obișnuită, SELL cel puțin 3 sub). Nu poate întoarce o statistică sigură. Dacă probabilitatea lui
+  iese mult din intervalul statistic, încrederea devine scăzută. Iar dacă, după cel puțin 30 de predicții verificate,
+  a greșit mai des decât statistica, decide statistica.
+- **Regula e testată:** pentru fiecare an, deciziile se iau doar cu ce se știa înainte, și raportul arată cât de des
+  a avut dreptate un BUY sau un SELL față de media acțiunilor din aceleași luni. Pe date fără semnal, regula nu dă
+  niciun BUY/SELL.
 
-Claude primește tot: indicatori, scoruri, statistica istorică, probabilitatea modelului, rezultate, insideri,
-trendul pieței, macro, fundamentale și știri. Răspunde într-un format fix: decizie, probabilitate, încredere,
-argumente și riscuri.
+Claude primește tot: indicatori, scoruri, decizia bazată pe dovezi, statistica, modelul, calitatea datelor,
+rezultate, insideri, trendul pieței, macro, fundamentale, știri și data următorului raport trimestrial. Răspunde
+într-un format fix: decizie, probabilitate, încredere, argumente și riscuri.
 
 ## Instalare
 
@@ -208,7 +224,8 @@ stockai/
   quality.py       calitatea datelor: split-uri, date vechi, goluri, lichiditate, bare incomplete
   model.py         modelul de probabilitate și testul walk-forward
   advisor.py       Claude: cerere cu output structurat și fallback automat la refuz
-  analyzer.py      orchestrare + detectarea semnalelor neclare
+  decision.py      decizia BUY / SELL / HOLD din dovezi, porți de siguranță, verificările lui Claude
+  analyzer.py      orchestrare
   universe.py      lista de ~115 acțiuni (universe.json)
   __main__.py      linia de comandă
 tests/             teste fără rețea (date sintetice, surse și Claude simulate)

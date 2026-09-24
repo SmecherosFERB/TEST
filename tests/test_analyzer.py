@@ -58,8 +58,8 @@ def test_analyze_never_calls_claude_in_never_mode(prices):
     advisor = FakeAdvisor()
     rec = Analyzer(FakeData(prices), advisor=advisor, claude_mode="never").analyze("aapl")
     assert advisor.contexts == []
-    assert rec.ticker == "AAPL" and rec.decided_by == "reguli"
-    assert rec.decision == rec.rule_decision
+    assert rec.ticker == "AAPL" and rec.decided_by == "statistică"
+    assert rec.decision == rec.final.action and rec.final.why
     assert set(rec.scores) == {"technical", "fundamental", "sentiment", "earnings", "insiders", "market", "composite"}
     # FakeData nu are surse opționale: componentele lor lipsesc, fără să oprească analiza.
     assert rec.scores["earnings"] is rec.scores["insiders"] is rec.scores["market"] is None
@@ -81,9 +81,11 @@ def test_analyze_auto_mode_asks_only_when_ambiguous(prices, monkeypatch):
     advisor = FakeAdvisor()
     analyzer = Analyzer(FakeData(prices), advisor=advisor, claude_mode="auto")
 
-    monkeypatch.setattr("stockai.analyzer.find_ambiguity", lambda *a: [])
+    from stockai.decision import Decision
+
+    monkeypatch.setattr("stockai.analyzer.base_decision", lambda *a: Decision(why=["clar"]))
     assert analyzer.analyze("X").claude is None
-    monkeypatch.setattr("stockai.analyzer.find_ambiguity", lambda *a: ["neclar"])
+    monkeypatch.setattr("stockai.analyzer.base_decision", lambda *a: Decision(why=["?"], ask=["neclar"]))
     assert analyzer.analyze("X").claude is not None
     assert len(advisor.contexts) == 1
 
@@ -91,7 +93,7 @@ def test_analyze_auto_mode_asks_only_when_ambiguous(prices, monkeypatch):
 def test_advisor_failure_falls_back_to_rules(prices):
     advisor = FakeAdvisor(error=AdvisorError("Claude a refuzat cererea"))
     rec = Analyzer(FakeData(prices), advisor=advisor, claude_mode="always").analyze("X")
-    assert rec.decision == rec.rule_decision
+    assert rec.decided_by == "statistică" and rec.decision == rec.final.action
     assert rec.claude_error == "Claude a refuzat cererea"
 
 

@@ -151,3 +151,21 @@ def test_beta_feature_recovers_true_beta_and_share_classes_count_once():
     prices["GOOGL"], prices["GOOG"] = prices["LOW"], prices["LOW"] * 1.001
     data = build_dataset(prices, market, horizon=20)
     assert "GOOG" not in set(data["ticker"]) and "GOOGL" in set(data["ticker"])
+
+
+def test_decision_backtest_makes_no_calls_on_noise_and_right_calls_on_signal():
+    rng = np.random.default_rng(11)
+    idx = pd.bdate_range(end="2026-09-23", periods=2800)
+    noise = {}
+    for k in range(20):
+        close = 40 * np.exp(np.cumsum(rng.normal(0.0003, 0.015, len(idx))))
+        noise[f"N{k}"] = pd.DataFrame({"Open": close, "High": close, "Low": close, "Close": close,
+                                       "Volume": np.full(len(idx), 1e6)}, index=idx)
+    d = walk_forward(build_dataset(noise, None, horizon=20), horizon=20).decisions
+    assert d["total"] > 1000 and d["buy"] + d["sell"] <= 0.02 * d["total"]
+
+    prices, market = momentum_world()
+    rep = walk_forward(build_dataset(prices, market, horizon=20, step=5), horizon=20)
+    d = rep.decisions
+    assert d["buy"] > 0 and d["buy_hit"] / d["buy"] > d["buy_same_month"] / d["buy"]
+    assert "Regula de decizie" in rep.render()

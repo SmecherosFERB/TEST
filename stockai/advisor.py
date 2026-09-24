@@ -22,6 +22,8 @@ Primești indicatori tehnici, scoruri pe componente, statistici istorice, date f
 probabilitatea ca prețul să fie mai mare la finalul orizontului.
 
 Reguli:
+- evidence_based_decision e decizia sistemului pe baza dovezilor. Decizia ta finală e verificată automat: BUY cere o
+  probabilitate cel puțin 3 puncte peste rata de bază, SELL cel puțin 3 sub, și nu poți întoarce o statistică sigură.
 - Pornește de la estimarea statistică (statistical_estimate) și intervalul ei de 90%. Rămâi în interval, cu excepția
   cazului în care ai motive puternice și concrete, pe care le spui explicit.
 - Majoritatea semnalelor publice au efecte mici; o probabilitate peste 65% sau sub 40% pe 4 săptămâni e rară și
