@@ -25,7 +25,7 @@ furnizorului înainte să plătești ceva.
 | Model de probabilitate verificat walk-forward și recalibrat pe anii nevăzuți | da (`--train`) | da (învață din acțiunile scanate) |
 | Ținta „bate S&P 500” (randament relativ) | da (`--train --target beat`) | da |
 | Verificarea calității datelor și reguli de selecție (lichiditate, sector, bare închise) | da (`quality.py`) | da |
-| Data următorului raport trimestrial (avertizare) | da (Twelve Data, altfel calendarul Alpha Vantage) | da (Twelve Data, altfel calendarul Alpha Vantage) |
+| Data următorului raport trimestrial (avertizare) | da (Twelve Data, altfel calendarul Alpha Vantage) | da (calendarul complet Alpha Vantage, o cerere pe zi pentru toată lista) |
 
 ## Ce îmbunătățește realist predicția
 

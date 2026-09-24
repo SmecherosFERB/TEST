@@ -910,18 +910,38 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     out.push(cur);
     return out;
   }
-  function nextFromCalendar(p, t) {
+  // Primul raport programat de azi încolo, pentru fiecare simbol din `wanted` (Alpha Vantage scrie BRK-B, noi BRK.B).
+  function calendarDates(p, wanted) {
     const text = String(p && typeof p === "object" && "result" in p ? p.result : p == null ? "" : p);
     const lines = text.trim().split(/\r?\n/);
     const head = splitCsv(lines.shift() || "");
     const iS = head.indexOf("symbol"), iD = head.indexOf("reportDate");
-    if (iS < 0 || iD < 0) return null;
-    const dates = lines.map(splitCsv)
-      .filter((c) => String(c[iS] || "").toUpperCase() === t)
-      .map((c) => String(c[iD] || "").slice(0, 10))
-      .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d) && d >= today())
-      .sort();
-    return dates[0] || null;
+    const out = {};
+    if (iS < 0 || iD < 0) return out;
+    for (const line of lines) {
+      const c = splitCsv(line), t = String(c[iS] || "").toUpperCase().replace(/-/g, "."), d = String(c[iD] || "").slice(0, 10);
+      if (!wanted.has(t) || !/^\d{4}-\d{2}-\d{2}$/.test(d) || d < today()) continue;
+      if (!out[t] || d < out[t]) out[t] = d;
+    }
+    return out;
+  }
+  const nextFromCalendar = (p, t) => calendarDates(p, new Set([t]))[t] || null;
+
+  // Calendarul complet (o cerere Alpha Vantage pe zi, împărțită prin baza de date): data următorului raport
+  // pentru toate acțiunile din listă, ca clasamentul să marcheze riscul de raport trimestrial.
+  let calendar = null;
+  const nextReport = (t) => { const d = calendar && calendar.next && calendar.next[t]; return typeof d === "string" && d >= today() ? d : null; };
+  async function ensureCalendar(mcp) {
+    if (calendar && calendar.day === today()) return calendar;
+    try {
+      const next = calendarDates(await avCall(mcp, "EARNINGS_CALENDAR", { horizon: "3month" }), new Set(dir.keys()));
+      if (Object.keys(next).length) {
+        calendar = { day: today(), next };
+        dbWrite("market/calendar", calendar);
+        renderRanking();
+      }
+    } catch { /* opțional: fără calendar, cardurile nu au marcaj */ }
+    return calendar;
   }
 
   // Twelve Data descrie fiecare tranzacție („Sale at price…”, „Purchase at price…”, acordări fără descriere).
@@ -1867,8 +1887,10 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       earnings: earningsSignal(ev.earnings, asOf),
       insiders: Array.isArray(ev.insiders) ? insiderSignal(ev.insidersCoded ? ev.insiders : classifyInsiders(ev.insiders, entry.weeks), asOf) : null,
       market: entry.market || null,
-      next: typeof ev.next === "string" && ev.next >= today()
-        ? { date: ev.next, days: Math.round((Date.parse(ev.next) - Date.parse(today())) / 864e5) } : null,
+      next: (() => {
+        const d = (typeof ev.next === "string" && ev.next >= today() ? ev.next : null) || nextReport(entry.ticker);
+        return d ? { date: d, days: Math.round((Date.parse(d) - Date.parse(today())) / 864e5) } : null;
+      })(),
     };
     const scores = {
       technical: ind.score[i],
@@ -1974,7 +1996,8 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       }
     }
     // Twelve Data nu dă mereu data raportului următor; atunci o luăm din calendarul Alpha Vantage (opțional).
-    if (!out.next) {
+    if (!out.next) out.next = nextReport(t);
+    if (!out.next && !(calendar && calendar.day === today())) {
       try { out.next = nextFromCalendar(await avCall(mcp, "EARNINGS_CALENDAR", { symbol: t, horizon: "3month" }), t); } catch { /* opțional */ }
     }
     if (!earningsError && !insidersError) dbWrite(`events/${t}`, out);
@@ -2206,6 +2229,13 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
         renderDirectory();
       }
     };
+    db.doc("market/calendar").onSnapshot((snap) => {
+      const v = snap.exists ? snap.data() : null;
+      if (v && v.next && typeof v.next === "object" && daysAgo(v.day) < 7 && (!calendar || String(v.day) >= String(calendar.day))) {
+        calendar = { day: v.day, next: v.next };
+        renderRanking();
+      }
+    }, onErr);
     db.doc("market/SPY").onSnapshot((snap) => {
       const v = snap.exists ? snap.data() : null;
       if (v && typeof v.label === "string" && (!marketDoc || String(v.day) >= String(marketDoc.day))) {
@@ -2289,7 +2319,10 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     const mcp = await mcpReady;
     let stopMsg = null;
     if (!mcp) stopMsg = AV_COPY("").no_mcp;
-    else await ensureMarket(mcp);
+    else {
+      await ensureMarket(mcp);
+      ensureCalendar(mcp);
+    }
     for (const t of mcp ? queue : []) {
       if (scanJob.stop) break;
       scanJob.current = t;
@@ -2584,8 +2617,10 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
           el("span", { class: "card-p", text: pct(h.p) }),
           el("span", { class: "card-sub", text: `±${half} pp · de obicei ${pct(h.base)}` }),
           Array.isArray(s.x) && fin(s.x[3]) ? el("span", { class: "card-sub", text: `mișcare tipică în 4 săpt.: ±${Math.round(s.x[3] * Math.sqrt(20 / 252) * 100)}%` }) : null,
-          typeof s.next === "string" && s.next >= today() && calDays(today(), s.next) <= 28
-            ? el("span", { class: "card-flag", text: `raport trimestrial în ${calDays(today(), s.next)} zile` }) : null,
+          ...(() => {
+            const nx = (typeof s.next === "string" && s.next >= today() ? s.next : null) || nextReport(s.ticker);
+            return nx && calDays(today(), nx) <= 28 ? [el("span", { class: "card-flag", title: "Prețul poate sări mult în ziua raportului.", text: `raport trimestrial în ${calDays(today(), nx)} zile` })] : [];
+          })(),
           h.sure ? el("span", { class: `sure${h.sure === "down" ? " down" : ""}`, text: h.sure === "up" ? "▲ peste medie, sigur statistic" : "▼ sub medie, sigur statistic" }) : null,
           sparkline(s.spark || []),
           el("span", { class: "card-sub", text: `6 luni ${spct(s.chg26w, 0)} · scanat ${whenText(s.scannedAt)}` }));
