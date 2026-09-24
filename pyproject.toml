@@ -1,0 +1,8 @@
+[project]
+name = "stockai"
+version = "0.1.0"
+description = "Analiză de acțiuni cu semnale BUY/SELL/HOLD și a doua opinie de la Claude"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
