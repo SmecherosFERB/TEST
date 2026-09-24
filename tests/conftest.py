@@ -36,3 +36,23 @@ class FakeData:
 @pytest.fixture
 def prices() -> pd.DataFrame:
     return make_prices()
+
+
+class RichFakeData(FakeData):
+    """Și sursele opționale: piața, rezultatele, insiderii, macro."""
+
+    def __init__(self, prices, market=None, quarters=None, trades=None, macro=None, **kw):
+        super().__init__(prices, **kw)
+        self._market, self._quarters, self._trades, self._macro = market, quarters, trades, macro
+
+    def market(self, period):
+        return self._market
+
+    def earnings(self, ticker):
+        return self._quarters
+
+    def insiders(self, ticker, close=None):
+        return self._trades
+
+    def macro(self):
+        return self._macro

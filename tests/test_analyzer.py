@@ -60,7 +60,9 @@ def test_analyze_never_calls_claude_in_never_mode(prices):
     assert advisor.contexts == []
     assert rec.ticker == "AAPL" and rec.decided_by == "reguli"
     assert rec.decision == rec.rule_decision
-    assert set(rec.scores) == {"technical", "fundamental", "sentiment", "composite"}
+    assert set(rec.scores) == {"technical", "fundamental", "sentiment", "earnings", "insiders", "market", "composite"}
+    # FakeData nu are surse opționale: componentele lor lipsesc, fără să oprească analiza.
+    assert rec.scores["earnings"] is rec.scores["insiders"] is rec.scores["market"] is None
 
 
 def test_analyze_always_mode_uses_claude_decision(prices):
@@ -96,3 +98,37 @@ def test_advisor_failure_falls_back_to_rules(prices):
 def test_short_history_raises():
     with pytest.raises(DataError, match="istoric prea scurt"):
         Analyzer(FakeData(make_prices(n=150))).analyze("NEW")
+
+
+def test_analyze_uses_optional_sources_and_model(prices):
+    from datetime import timedelta
+
+    from stockai.model import ProbabilityModel, build_dataset
+
+    from .conftest import RichFakeData
+
+    last_day = prices.index[-1].date()
+    quarters = [{"reported": last_day - timedelta(days=20), "eps": 2.0, "estimate": 1.8, "surprise_pct": 11.0}]
+    trades = [
+        {"date": last_day - timedelta(days=15), "owner": "A", "code": "P", "shares": 1000, "price": 50.0},
+        {"date": last_day - timedelta(days=30), "owner": "B", "code": "P", "shares": 500, "price": 48.0},
+    ]
+    macro = {"VIXCLS": {"value": 16.0}, "BAMLH0A0HYM2": {"value": 3.1, "change_3m": 0.0}}
+    market = make_prices(drift=0.001, vol=0.008, seed=11)
+    model = ProbabilityModel(20).fit(build_dataset({"X": prices, "Y": make_prices(seed=5)}, market["Close"]))
+    advisor = FakeAdvisor()
+    data = RichFakeData(prices, market=market, quarters=quarters, trades=trades, macro=macro)
+
+    rec = Analyzer(data, advisor=advisor, claude_mode="always", model=model).analyze("X")
+    assert rec.scores["earnings"] > 50 and rec.scores["insiders"] == 80 and rec.scores["market"] is not None
+    assert rec.extras["insiders"]["buyers"] == 2 and rec.extras["earnings"]["last_surprise_pct"] == 11.0
+    assert 0 < rec.model["prob"] < 1 and rec.model["trained"]["tickers"] == 2
+    ctx = advisor.contexts[0]
+    assert ctx["earnings"]["beats_last4"] == "1/1"
+    assert ctx["statistical_model"]["prob_up"] == round(rec.model["prob"], 3)
+    assert ctx["market_trend_sp500"]["label"] == "în creștere"
+
+
+def test_model_disagreement_is_ambiguous():
+    reasons = find_ambiguity(scores(), "BUY", odds(0.65), Settings(), {"prob": 0.45, "base_rate": 0.55})
+    assert any("modelul statistic contrazice" in r for r in reasons)

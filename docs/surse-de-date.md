@@ -13,6 +13,17 @@ furnizorului înainte să plătești ceva.
 | 4 (opțional) | **FMP Starter** sau **Tiingo Power** | ~22–30 $/lună | estimări și surprize la rezultate, istoric zilnic curat |
 | — | **TradingView Lightweight Charts** | gratuit (Apache 2.0) | grafice cu lumânări, zoom, volum |
 
+## Ce e deja implementat
+
+| Sursă | Programul Python | Pagina claude.ai |
+|---|---|---|
+| Twelve Data (prețuri zilnice) | da, cu `TWELVE_DATA_API_KEY` | după ce termini conectarea conectorului |
+| Alpha Vantage: știri, rezultate trimestriale, insideri | da | da |
+| SEC EDGAR: insideri (formularele 4) | da, cu `SEC_USER_AGENT` | nu (fără conector) |
+| FRED: VIX, curba randamentelor, prima de risc | da | nu (fără conector) |
+| Trendul S&P 500 (SPY) | da | da |
+| Model de probabilitate verificat walk-forward | da (`--train`) | nu încă |
+
 ## Ce îmbunătățește realist predicția
 
 Mai multe surse nu înseamnă automat predicții mai bune. Ce contează:

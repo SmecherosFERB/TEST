@@ -1,4 +1,12 @@
-"""Surse de date: prețuri și fundamentale (Yahoo Finance), știri cu sentiment (Alpha Vantage)."""
+"""Surse de date. Toate sunt gratuite; fiecare sursă fără cheie sau fără răspuns e pur și simplu omisă.
+
+- prețuri zilnice: Twelve Data (dacă ai TWELVE_DATA_API_KEY), altfel Yahoo Finance (neoficial);
+- fundamentale: Yahoo Finance;
+- știri cu sentiment, rezultate trimestriale: Alpha Vantage (ALPHA_VANTAGE_API_KEY);
+- tranzacțiile insiderilor: SEC EDGAR (SEC_USER_AGENT), altfel Alpha Vantage;
+- context macro: FRED (FRED_API_KEY opțional);
+- trendul pieței: indicele S&P 500 prin ETF-ul SPY.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +15,9 @@ import os
 from typing import Any, Protocol
 
 import pandas as pd
-import requests
+
+from .cache import DiskCache
+from .errors import DataError
 
 log = logging.getLogger(__name__)
 
@@ -29,24 +39,65 @@ FUNDAMENTAL_KEYS = (
     "fiftyTwoWeekLow",
 )
 
-
-class DataError(RuntimeError):
-    pass
+MARKET_SYMBOL = "SPY"
 
 
 class DataProvider(Protocol):
+    """Minimul necesar. Metodele opționale (earnings, insiders, macro) sunt folosite doar dacă există."""
+
     def prices(self, ticker: str, period: str) -> pd.DataFrame: ...
     def fundamentals(self, ticker: str) -> dict[str, Any]: ...
     def news(self, ticker: str) -> list[dict[str, Any]]: ...
 
 
 class MarketData:
-    """Yahoo Finance pentru prețuri și fundamentale; Alpha Vantage pentru sentiment, dacă are cheie."""
+    def __init__(
+        self,
+        alpha_vantage_key: str | None = None,
+        twelve_data_key: str | None = None,
+        fred_key: str | None = None,
+        sec_user_agent: str | None = None,
+        cache: DiskCache | None = None,
+    ) -> None:
+        self.cache = cache or DiskCache()
+        av_key = alpha_vantage_key or os.getenv("ALPHA_VANTAGE_API_KEY") or None
+        td_key = twelve_data_key or os.getenv("TWELVE_DATA_API_KEY") or None
+        sec_ua = sec_user_agent or os.getenv("SEC_USER_AGENT") or None
 
-    def __init__(self, alpha_vantage_key: str | None = None) -> None:
-        self.alpha_vantage_key = alpha_vantage_key or os.getenv("ALPHA_VANTAGE_API_KEY") or None
+        from .sources.alphavantage import AlphaVantage
+        from .sources.fred import Fred
+        from .sources.twelvedata import TwelveData
 
+        self.av = AlphaVantage(av_key) if av_key else None
+        self.td = TwelveData(td_key) if td_key else None
+        self.fred = Fred(fred_key or os.getenv("FRED_API_KEY") or None, cache=self.cache)
+        self.sec = None
+        if sec_ua:
+            from .sources.sec import SecEdgar
+
+            try:
+                self.sec = SecEdgar(sec_ua, cache=self.cache)
+            except DataError as exc:
+                log.warning("%s", exc)
+
+    # ---- prețuri ----
     def prices(self, ticker: str, period: str) -> pd.DataFrame:
+        key = f"prices_{ticker}"
+        cached = self.cache.get_frame(key, max_age_hours=12)
+        if cached is not None and not cached.empty:
+            return cached
+        frame = None
+        if self.td:
+            try:
+                frame = self.td.daily(ticker)
+            except DataError as exc:
+                log.warning("%s; încerc Yahoo Finance", exc)
+        if frame is None:
+            frame = self._yahoo_prices(ticker, period)
+        self.cache.set_frame(key, frame)
+        return frame
+
+    def _yahoo_prices(self, ticker: str, period: str) -> pd.DataFrame:
         import yfinance as yf
 
         try:
@@ -55,8 +106,18 @@ class MarketData:
             raise DataError(f"Nu am putut descărca prețurile pentru {ticker}: {exc}") from exc
         if df.empty:
             raise DataError(f"Nu există prețuri pentru {ticker} (simbol greșit?)")
-        return df[["Open", "High", "Low", "Close", "Volume"]]
+        df = df[["Open", "High", "Low", "Close", "Volume"]]
+        df.index = pd.DatetimeIndex(df.index).tz_localize(None)
+        return df
 
+    def market(self, period: str) -> pd.DataFrame | None:
+        try:
+            return self.prices(MARKET_SYMBOL, period)
+        except DataError as exc:
+            log.warning("Trendul pieței indisponibil: %s", exc)
+            return None
+
+    # ---- companie ----
     def fundamentals(self, ticker: str) -> dict[str, Any]:
         import yfinance as yf
 
@@ -68,34 +129,56 @@ class MarketData:
         return {k: info[k] for k in FUNDAMENTAL_KEYS if info.get(k) is not None}
 
     def news(self, ticker: str) -> list[dict[str, Any]]:
-        if self.alpha_vantage_key:
-            items = self._alpha_vantage_news(ticker)
-            if items:
-                return items
+        if self.av:
+            try:
+                items = self.av.news(ticker)
+                if items:
+                    return items
+            except DataError as exc:
+                log.warning("%s", exc)
         return self._yahoo_headlines(ticker)
 
-    def _alpha_vantage_news(self, ticker: str, limit: int = 30) -> list[dict[str, Any]]:
+    def earnings(self, ticker: str) -> list[dict[str, Any]] | None:
+        if not self.av:
+            return None
+        key = f"earnings_{ticker}"
+        cached = self.cache.get_json(key, max_age_hours=24 * 3)
+        if cached is not None:
+            return _restore_dates(cached, "reported")
         try:
-            resp = requests.get(
-                "https://www.alphavantage.co/query",
-                params={
-                    "function": "NEWS_SENTIMENT",
-                    "tickers": ticker,
-                    "limit": limit,
-                    "apikey": self.alpha_vantage_key,
-                },
-                timeout=20,
-            )
-            resp.raise_for_status()
-            payload = resp.json()
-        except (requests.RequestException, ValueError) as exc:
-            log.warning("Alpha Vantage indisponibil pentru %s: %s", ticker, exc)
-            return []
-        if "feed" not in payload:
-            # La limită de apeluri, Alpha Vantage răspunde cu „Note” sau „Information”.
-            log.warning("Alpha Vantage: %s", payload.get("Note") or payload.get("Information") or payload)
-            return []
-        return parse_alpha_vantage_feed(payload["feed"], ticker)
+            quarters = self.av.earnings(ticker)
+        except DataError as exc:
+            log.warning("%s", exc)
+            return None
+        self.cache.set_json(key, quarters)
+        return quarters
+
+    def insiders(self, ticker: str, close: pd.Series | None = None) -> list[dict[str, Any]] | None:
+        """Cumpărări (cod P) și vânzări (cod S) pe piață ale insiderilor."""
+        key = f"insiders_{ticker}"
+        cached = self.cache.get_json(key, max_age_hours=24)
+        if cached is not None:
+            return _restore_dates(cached, "date")
+        trades = None
+        if self.sec:
+            try:
+                trades = [t for t in self.sec.insider_trades(ticker) if t["code"] in ("P", "S")]
+            except DataError as exc:
+                log.warning("%s", exc)
+        if trades is None and self.av and close is not None:
+            from .sources.alphavantage import classify_insiders
+
+            try:
+                trades = classify_insiders(self.av.insiders(ticker), close)
+            except DataError as exc:
+                log.warning("%s", exc)
+        if trades is not None:
+            self.cache.set_json(key, trades)
+        return trades
+
+    def macro(self) -> dict[str, Any] | None:
+        snap = self.fred.snapshot()
+        return snap or None
 
     def _yahoo_headlines(self, ticker: str) -> list[dict[str, Any]]:
         import yfinance as yf
@@ -106,6 +189,18 @@ class MarketData:
             log.warning("Știri Yahoo indisponibile pentru %s: %s", ticker, exc)
             return []
         return parse_yahoo_news(raw)
+
+
+def _restore_dates(rows: list[dict[str, Any]], field: str) -> list[dict[str, Any]]:
+    from datetime import date
+
+    out = []
+    for r in rows:
+        try:
+            out.append({**r, field: date.fromisoformat(str(r[field])[:10])})
+        except (KeyError, ValueError):
+            continue
+    return out
 
 
 def parse_alpha_vantage_feed(feed: list[dict[str, Any]], ticker: str) -> list[dict[str, Any]]:
