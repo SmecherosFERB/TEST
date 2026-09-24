@@ -1,7 +1,7 @@
 <title>StockAI</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <style>
 :root {
   --bg: #edf1f4;
@@ -107,7 +107,7 @@ body {
 }
 h1, h2, h3 { margin: 0; text-wrap: balance; }
 p { margin: 0; }
-button, input { font: inherit; }
+button, input, select { font: inherit; }
 .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 
 /* Top bar */
@@ -135,18 +135,14 @@ button, input { font: inherit; }
   text-transform: uppercase;
   color: var(--muted);
 }
-.search input {
-  width: 9.5em;
+.field {
   padding: 9px 12px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
   background: var(--surface);
   color: var(--ink);
-  font-family: var(--mono);
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: .04em;
 }
+.search input { width: 17em; max-width: 100%; }
 .btn {
   padding: 9px 16px;
   border-radius: 8px;
@@ -163,7 +159,8 @@ button, input { font: inherit; }
   border-color: var(--line-strong);
 }
 .btn.small { padding: 6px 12px; font-size: 14px; }
-:is(button, input, a, svg, summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn.tiny { padding: 2px 9px; font-size: 12px; border-radius: 6px; }
+:is(button, input, select, a, svg, summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .subbar {
   display: flex;
@@ -206,6 +203,83 @@ button, input { font: inherit; }
 }
 .note { font-size: 13px; color: var(--muted); }
 
+/* Ranking */
+.rank-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px 24px;
+  margin-bottom: 14px;
+}
+.rank-title { font-family: var(--display); font-weight: 800; font-size: 24px; letter-spacing: -.01em; }
+.rank-sub { color: var(--muted); font-size: 14px; max-width: 62ch; margin-top: 2px; }
+.scanbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); }
+.scanbar select { padding: 6px 8px; }
+.scan-status { font-size: 13px; color: var(--ink-2); margin-bottom: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(172px, 1fr));
+  gap: 12px;
+}
+.card {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  text-align: left;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink);
+  cursor: pointer;
+}
+.card:hover { border-color: var(--accent); }
+.card-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.card-t { font-family: var(--display); font-weight: 800; font-size: 19px; letter-spacing: -.01em; }
+.card-nm { font-size: 13px; color: var(--ink-2); line-height: 1.3; }
+.card-p { font-family: var(--mono); font-size: 28px; font-weight: 500; line-height: 1.1; margin-top: 6px; }
+.card-sub { font-size: 12px; color: var(--muted); }
+.card svg { width: 100%; height: 34px; display: block; margin-top: 4px; }
+.sig {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--d-soft, var(--surface-2));
+  color: var(--d, var(--ink-2));
+  white-space: nowrap;
+}
+.sig[data-d="BUY"] { --d: var(--buy); --d-soft: var(--buy-soft); }
+.sig[data-d="SELL"] { --d: var(--sell); --d-soft: var(--sell-soft); }
+.sig[data-d="HOLD"] { --d: var(--hold); --d-soft: var(--hold-soft); }
+.empty { padding: 18px; border: 1px dashed var(--line-strong); border-radius: 10px; color: var(--ink-2); font-size: 14px; display: grid; gap: 10px; justify-items: start; }
+
+/* Directory table */
+.dir-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px 16px; margin-bottom: 12px; }
+.dir-head .panel-title { margin: 0; }
+.dir-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.dir-tools input { width: 15em; max-width: 100%; padding: 6px 10px; }
+.dir-tools select { padding: 6px 8px; }
+.table-box { max-height: 560px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+.table-box table { font-size: 14px; }
+.table-box thead th { position: sticky; top: 0; background: var(--surface); z-index: 1; box-shadow: inset 0 -1px 0 var(--line); }
+.table-box tbody tr { cursor: pointer; }
+.table-box tbody tr:hover { background: var(--surface-2); }
+.linkbtn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-weight: 600;
+  cursor: pointer;
+}
+.added { font-size: 11px; color: var(--muted); margin-left: 6px; }
+
 /* Progress */
 .steps { display: flex; flex-wrap: wrap; gap: 8px 20px; list-style: none; margin: 0; padding: 0; }
 .steps li { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
@@ -222,8 +296,11 @@ button, input { font: inherit; }
 .steps li[data-s="skip"]::before { border-style: dashed; }
 .steps li[data-s="fail"] { color: var(--sell); }
 .steps li[data-s="fail"]::before { border-color: var(--sell); background: var(--sell-soft); }
+.spinner { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--accent); border-top-color: transparent; animation: spin .8s linear infinite; flex: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .steps li[data-s="active"]::before { animation: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .steps li[data-s="active"]::before, .spinner { animation: none; }
+}
 
 .alert {
   border-radius: 12px;
@@ -269,7 +346,8 @@ button, input { font: inherit; }
 .keynum-value { font-family: var(--mono); font-size: 20px; font-weight: 500; }
 .keynum-value small { font-family: var(--sans); font-size: 13px; color: var(--muted); font-weight: 400; }
 
-/* Main grid */
+/* Detail grid */
+.detail-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
 .grid {
   display: grid;
   grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr);
@@ -338,30 +416,15 @@ td .hint { color: var(--muted); }
 
 /* Claude */
 .claude { display: grid; gap: 12px; }
-.claude-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .reasons { margin: 0; padding-left: 18px; color: var(--ink-2); font-size: 14px; display: grid; gap: 4px; }
 .claude-answer { display: grid; gap: 10px; }
 .claude-line { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
-.pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 10px;
-  border-radius: 999px;
-  font-weight: 600;
-  font-size: 14px;
-  background: var(--d-soft, var(--surface-2));
-  color: var(--d, var(--ink));
-}
-.pill[data-d="BUY"] { --d: var(--buy); --d-soft: var(--buy-soft); }
-.pill[data-d="SELL"] { --d: var(--sell); --d-soft: var(--sell-soft); }
-.pill[data-d="HOLD"] { --d: var(--hold); --d-soft: var(--hold-soft); }
 .claude-text { font-size: 15px; line-height: 1.6; max-width: 65ch; }
 .risks { margin: 0; padding-left: 18px; font-size: 14px; color: var(--ink-2); }
 .thinking { display: flex; align-items: center; gap: 10px; color: var(--ink-2); font-size: 14px; }
 
 /* Fundamentals */
-.kv { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; font-size: 14px; }
+.kv { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; font-size: 14px; margin: 0; }
 .kv dt { color: var(--ink-2); }
 .kv dd { margin: 0; font-family: var(--mono); text-align: right; }
 
@@ -377,22 +440,20 @@ td .hint { color: var(--muted); }
 .senti[data-p="pos"] .g { color: var(--pos); }
 .senti[data-p="neg"] .g { color: var(--neg); }
 
-/* Intro */
-.intro { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
-.intro h3 { font-family: var(--display); font-weight: 600; font-size: 17px; margin-bottom: 6px; }
-.intro p { color: var(--ink-2); font-size: 14px; }
-
 footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-width: 90ch; }
 
 @media (max-width: 900px) {
   .grid { grid-template-columns: minmax(0, 1fr); }
   .verdict { grid-template-columns: minmax(0, 1fr); justify-items: start; }
   .decision { justify-self: stretch; }
-  .intro { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .col-sector, .col-when { display: none; }
 }
 @media (max-width: 480px) {
   .app { padding-inline: 16px; }
   .stock-name { font-size: 28px; }
+  .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .score-row, .score-scale { grid-template-columns: 82px minmax(0, 1fr) 44px; }
   .meter { grid-template-columns: 104px minmax(0, 1fr) 40px; }
 }
@@ -405,36 +466,34 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       <p class="tagline">Semnale BUY / SELL / HOLD. Claude decide când regulile nu sunt sigure.</p>
     </div>
     <form class="search" id="form" novalidate>
-      <label for="ticker">Simbol</label>
-      <input id="ticker" name="ticker" autocomplete="off" spellcheck="false" maxlength="10" value="AAPL" aria-describedby="quota">
+      <label for="ticker">Acțiune</label>
+      <input class="field" id="ticker" name="ticker" list="stockList" autocomplete="off" spellcheck="false" maxlength="40" placeholder="Simbol sau nume, ex. Apple" aria-describedby="quota">
+      <datalist id="stockList"></datalist>
       <button class="btn" id="go" type="submit">Analizează</button>
     </form>
   </header>
 
   <div class="subbar">
     <div class="recent" id="recent" aria-label="Analize recente"></div>
-    <div id="quota" class="num">Alpha Vantage gratuit: 25 de cereri pe zi, 3 pe analiză</div>
+    <div id="quota" class="num">Alpha Vantage gratuit: 25 de cereri pe zi</div>
   </div>
-
-  <section class="panel" id="progress" hidden>
-    <ul class="steps" id="steps"></ul>
-  </section>
 
   <div class="alert" id="alert" role="alert" hidden></div>
 
-  <section class="intro" id="intro">
-    <div class="panel">
-      <h3>1. Date live</h3>
-      <p>Prețuri săptămânale pe ultimii ani, date fundamentale și știri cu sentiment, prin conectorul tău Alpha Vantage.</p>
+  <section class="panel" id="ranking" aria-labelledby="rankTitle">
+    <div class="rank-head">
+      <div>
+        <h1 class="rank-title" id="rankTitle">Șanse mari acum</h1>
+        <p class="rank-sub">Acțiunile care, în situații tehnice ca cea de acum, au urcat cel mai des în următoarele 4 săptămâni (statistică pe ultimii 10 ani).</p>
+      </div>
+      <div class="scanbar" id="scanbar"></div>
     </div>
-    <div class="panel">
-      <h3>2. Reguli și istoric</h3>
-      <p>Scor tehnic, fundamental și de sentiment. Apoi: cât de des a urcat prețul în 4 săptămâni când scorul arăta ca acum.</p>
-    </div>
-    <div class="panel">
-      <h3>3. Claude la semnale neclare</h3>
-      <p>Dacă scorul e neutru, componentele se contrazic sau istoricul nu ajută, Claude citește toate datele și decide.</p>
-    </div>
+    <div class="scan-status" id="scanStatus" hidden></div>
+    <div id="cards"></div>
+  </section>
+
+  <section class="panel" id="progress" hidden>
+    <ul class="steps" id="steps"></ul>
   </section>
 
   <div id="result" hidden>
@@ -482,9 +541,26 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     </div>
   </div>
 
+  <section class="panel" id="directory">
+    <div class="dir-head">
+      <h2 class="panel-title" id="dirTitle">Toate acțiunile</h2>
+      <div class="dir-tools">
+        <label class="note" for="dirQuery">Caută</label>
+        <input class="field" id="dirQuery" type="search" placeholder="nume, simbol sau sector" autocomplete="off">
+        <label class="note" for="dirSort">Ordine</label>
+        <select class="field" id="dirSort">
+          <option value="chance">Șanse de creștere</option>
+          <option value="rank">Importanță</option>
+          <option value="name">Nume</option>
+        </select>
+      </div>
+    </div>
+    <div id="dirBody"></div>
+  </section>
+
   <footer>
     <p>Unealtă de analiză, nu sfat financiar. Procentele descriu trecutul acțiunii și nu garantează nimic.</p>
-    <p>Metodă: bare săptămânale (planul gratuit Alpha Vantage nu oferă istoric zilnic complet), orizont de 4 săptămâni, statistică pe ultimii 10 ani. Săptămânile similare se suprapun, deci n supraestimează cazurile independente.</p>
+    <p>Metodă: bare săptămânale (planul gratuit Alpha Vantage nu oferă istoric zilnic complet), orizont de 4 săptămâni, statistică pe ultimii 10 ani. Clasamentul folosește doar partea tehnică; analiza completă adaugă fundamentale, știri și, la semnale neclare, opinia lui Claude. Săptămânile similare se suprapun, deci n supraestimează cazurile independente.</p>
   </footer>
 </div>
 
@@ -501,6 +577,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     minEdge: 0.03,
     threshold: 25,
     conflict: 30,
+    staleDays: 6,
     weights: { technical: 0.5, fundamental: 0.25, sentiment: 0.25 },
     techWeights: { trend: 0.35, macd: 0.25, rsi: 0.2, bollinger: 0.1, volume: 0.1 },
   };
@@ -510,10 +587,12 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
   const GLYPH = { BUY: "▲", SELL: "▼", HOLD: "■" };
   const CONF = { low: "scăzută", medium: "medie", high: "ridicată" };
   const CLAUDE_GC = 6 * 3600 * 1000;
+  const TICKER_RE = /^[A-Z0-9][A-Z0-9.\-]{0,9}$/;
 
   const use = (name) => (window.claude && window.claude.use ? window.claude.use(name) : Promise.resolve(null));
   const mcpReady = use("mcp");
   const sampleReady = use("sample");
+  const dbReady = use("db");
 
   // ---------- small helpers ----------
   const $ = (id) => document.getElementById(id);
@@ -548,40 +627,77 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
   const money = (x) => (fin(x) ? x.toLocaleString("ro-RO", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "n/a");
   const fmtDate = (iso) => { const [y, m, d] = iso.split("-").map(Number); return `${d} ${MONTHS[m - 1]} ${y}`; };
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const norm = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  const r1 = (x) => (fin(x) ? Math.round(x * 10) / 10 : null);
+  const r2 = (x) => (fin(x) ? Math.round(x * 100) / 100 : null);
+  const r4 = (x) => (fin(x) ? Math.round(x * 10000) / 10000 : null);
+  const daysAgo = (iso) => { const t = Date.parse(iso); return Number.isFinite(t) ? (Date.now() - t) / 864e5 : Infinity; };
+  function whenText(iso) {
+    const d = daysAgo(iso);
+    if (!Number.isFinite(d)) return "";
+    if (d < 1 && new Date(iso).getDate() === new Date().getDate()) return "azi";
+    if (d < 2) return "ieri";
+    return `acum ${Math.floor(d)} zile`;
+  }
 
   const store = {
     get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
-    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* storage unavailable: page still works */ } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } },
+    del(k) { try { localStorage.removeItem(k); } catch { /* ignore */ } },
   };
   const K = {
     data: (t) => `stockai:v1:data:${t}`,
+    weekly: (t) => `stockai:v2:w:${t}`,
+    lru: "stockai:v2:lru",
     recent: "stockai:v1:recent",
     calls: "stockai:v1:calls",
     last: "stockai:v1:last",
   };
+  // Browser cache for today's downloads, so re-opening a stock costs no Alpha Vantage requests.
+  function cachePut(key, value) {
+    let lru = (store.get(K.lru) || []).filter((k) => k !== key);
+    lru.unshift(key);
+    while (lru.length > 16) store.del(lru.pop());
+    if (!store.set(key, value)) {
+      while (lru.length > 1) store.del(lru.pop());
+      store.set(key, value);
+    }
+    store.set(K.lru, lru);
+  }
 
   // ---------- Alpha Vantage via the viewer's connector ----------
   class AvError extends Error {
     constructor(kind, message) { super(message); this.kind = kind; }
   }
+  const FATAL = new Set(["av_quota", "server_not_connected", "needs_reauth", "not_in_manifest", "blocked_by_policy",
+    "approval_required", "selection_required", "server_unavailable", "no_mcp", "not_granted", "capability_disabled",
+    "capability_removed", "upstream_error"]);
+
+  // One request slot at a time, at least 1.3 s apart (free plan: max 1 per second).
+  let paceChain = Promise.resolve();
   let lastCallAt = 0;
-  async function pace() {
-    const wait = lastCallAt + 1300 - Date.now();
-    if (wait > 0) await sleep(wait);
-    lastCallAt = Date.now();
+  function pace() {
+    const p = paceChain.then(async () => {
+      const wait = lastCallAt + 1300 - Date.now();
+      if (wait > 0) await sleep(wait);
+      lastCallAt = Date.now();
+    });
+    paceChain = p;
+    return p;
+  }
+  function callsToday() {
+    const c = store.get(K.calls);
+    return c && c.day === today() ? c.n : 0;
   }
   function countCall() {
-    const c = store.get(K.calls);
-    const n = c && c.day === today() ? c.n + 1 : 1;
-    store.set(K.calls, { day: today(), n });
+    store.set(K.calls, { day: today(), n: callsToday() + 1 });
     renderQuota();
   }
   function renderQuota() {
-    const c = store.get(K.calls);
-    const n = c && c.day === today() ? c.n : 0;
+    const n = callsToday();
     $("quota").textContent = n
-      ? `Cereri Alpha Vantage azi (din acest browser): ${n} din 25 · 3 pe analiză`
-      : "Alpha Vantage gratuit: 25 de cereri pe zi, 3 pe analiză";
+      ? `Cereri Alpha Vantage azi (din acest browser): ${n} din 25`
+      : "Alpha Vantage gratuit: 25 de cereri pe zi";
   }
 
   function avPayloadError(p) {
@@ -633,7 +749,16 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       .map(([d, v]) => ({ d, c: num(v["4. close"]), v: num(v["5. volume"]) }))
       .filter((r) => fin(r.c) && fin(r.v) && /^\d{4}-\d{2}-\d{2}$/.test(r.d))
       .sort((a, b) => (a.d < b.d ? -1 : 1));
-    return rows.slice(-700);
+    if (!rows.length) throw new AvError("no_data", "Fără serie săptămânală");
+    return rows.slice(-600);
+  }
+
+  async function getWeekly(mcp, t) {
+    const hit = store.get(K.weekly(t));
+    if (hit && hit.day === today() && Array.isArray(hit.weeks) && hit.weeks.length) return hit.weeks;
+    const weeks = parseWeekly(await avCall(mcp, "TIME_SERIES_WEEKLY", { symbol: t, datatype: "json", return_full_data: true }));
+    cachePut(K.weekly(t), { day: today(), weeks });
+    return weeks;
   }
 
   function parseOverview(p) {
@@ -674,6 +799,13 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       };
     }).filter((n) => n.title);
   }
+
+  const SECTOR_MAP = [
+    [/tech/i, "Tehnologie"], [/financ/i, "Financiar"], [/health|life sci/i, "Sănătate"], [/energy/i, "Energie"],
+    [/defensive|staples/i, "Consum de bază"], [/consumer|trade|retail/i, "Consum"], [/industr|manufact/i, "Industrie"],
+    [/communic|media/i, "Comunicații"], [/utilit/i, "Utilități"], [/real estate/i, "Imobiliare"], [/material/i, "Materiale"],
+  ];
+  const sectorRo = (s) => (s && (SECTOR_MAP.find(([re]) => re.test(s)) || [])[1]) || "Altele";
 
   // ---------- indicators & scoring (same rules as the Python package) ----------
   function sma(a, n) {
@@ -805,12 +937,16 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     return out;
   }
 
-  function analyze(entry) {
-    const weeks = entry.weeks;
+  function technical(weeks) {
     if (weeks.length < 60) throw new AvError("short_history", "istoric prea scurt");
     const ind = indicators(weeks);
     const i = weeks.length - 1;
     if (!fin(ind.score[i])) throw new AvError("short_history", "istoric prea scurt");
+    return { ind, i, odds: historicalOdds(ind.c, ind.score, ind.score[i]) };
+  }
+
+  function analyze(entry) {
+    const { ind, i, odds } = technical(entry.weeks);
     const scores = {
       technical: ind.score[i],
       fundamental: fundamentalScore(entry.overview),
@@ -818,19 +954,181 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     };
     scores.composite = compositeScore(scores);
     const rule = decide(scores.composite);
-    const odds = historicalOdds(ind.c, ind.score, scores.technical);
     return { ind, i, scores, rule, odds, reasons: findAmbiguity(scores, rule, odds) };
+  }
+
+  // ---------- shared database: stock list + scan results ----------
+  let db = null;
+  let dbOff = false;
+  const dir = new Map();
+  const scans = new Map();
+  let dirReady = false, scansReady = false, autoScanTried = false;
+  const writeChains = new Map();
+
+  // One write at a time per document.
+  function dbWrite(path, data) {
+    if (!db || dbOff) return Promise.resolve();
+    const prev = writeChains.get(path) || Promise.resolve();
+    const next = prev.then(() => db.doc(path).set(data)).catch((e) => {
+      const code = e && e.code;
+      if (code === "unavailable") return sleep(800 + Math.random() * 800).then(() => db.doc(path).set(data)).catch(() => {});
+      if (code === "quota_exceeded") showAlert("Baza de date e plină", "Nu mai pot salva acțiuni noi. Spune-i lui Claude să facă loc în listă.");
+      return undefined;
+    });
+    writeChains.set(path, next);
+    return next;
+  }
+
+  function scanRecord(t, weeks) {
+    const { ind, i, odds } = technical(weeks);
+    return {
+      ticker: t,
+      week: weeks[i].d,
+      scannedAt: new Date().toISOString(),
+      price: r2(ind.c[i]),
+      chg4w: r4(change(ind.c, i, 4)),
+      chg26w: r4(change(ind.c, i, 26)),
+      tech: r1(ind.score[i]),
+      rule: decide(ind.score[i]),
+      prob: odds ? r4(odds.prob) : null,
+      base: odds ? r4(odds.base) : null,
+      avgRet: odds ? r4(odds.avgRet) : null,
+      n: odds ? odds.n : 0,
+      spark: ind.c.slice(-26).map(r2),
+    };
+  }
+
+  function saveScan(t, rec) {
+    const prev = scans.get(t);
+    if (!rec.full && prev && prev.full && prev.full.week === rec.week) rec.full = prev.full;
+    scans.set(t, rec);
+    renderRanking();
+    renderDirectory();
+    return dbWrite(`scans/${t}`, rec);
+  }
+
+  function recordDetail(entry, a) {
+    let rec;
+    try { rec = scanRecord(entry.ticker, entry.weeks); } catch { return; }
+    const fd = finalDecisionFor(entry, a);
+    rec.full = {
+      week: rec.week,
+      decision: fd.d,
+      by: fd.by,
+      composite: r1(a.scores.composite),
+      claudeProb: fd.v && fin(fd.v.probability_up_pct) ? fd.v.probability_up_pct : null,
+    };
+    saveScan(entry.ticker, rec);
+    if (!dir.has(entry.ticker) && db && !dbOff) {
+      const o = entry.overview;
+      const doc = {
+        ticker: entry.ticker,
+        name: (o && o.name) || entry.ticker,
+        sector: sectorRo(o && o.sector),
+        rank: 1000 + dir.size,
+        source: "adăugat",
+      };
+      dir.set(entry.ticker, doc);
+      renderDatalist();
+      dbWrite(`stocks/${entry.ticker}`, doc);
+    }
+  }
+
+  async function initDb() {
+    db = await dbReady;
+    if (!db) { dbOff = true; renderRanking(); renderDirectory(); return; }
+    const onErr = (e) => {
+      if (e && ["revoked", "not_granted", "capability_disabled", "capability_removed"].includes(e.code)) {
+        dbOff = true;
+        renderRanking();
+        renderDirectory();
+      }
+    };
+    db.collection("stocks").onSnapshot((snap) => {
+      const local = [...dir.values()].filter((d) => d.source === "adăugat");
+      dir.clear();
+      for (const d of snap.docs) {
+        const v = d.data();
+        if (v && typeof v.ticker === "string" && typeof v.name === "string") dir.set(v.ticker, v);
+      }
+      for (const d of local) if (!dir.has(d.ticker)) dir.set(d.ticker, d);
+      if (!snap.metadata.fromCache) dirReady = true;
+      renderDatalist();
+      renderRanking();
+      renderDirectory();
+      maybeAutoScan();
+    }, onErr);
+    db.collection("scans").onSnapshot((snap) => {
+      scans.clear();
+      for (const d of snap.docs) {
+        const v = d.data();
+        if (v && typeof v.ticker === "string") scans.set(v.ticker, v);
+      }
+      if (!snap.metadata.fromCache) scansReady = true;
+      renderRanking();
+      renderDirectory();
+      maybeAutoScan();
+    }, onErr);
+  }
+
+  // First visit: scan a few of the most important stocks so the ranking isn't empty.
+  function maybeAutoScan() {
+    if (autoScanTried || !dirReady || !scansReady || scanJob) return;
+    autoScanTried = true;
+    if (scans.size === 0 && dir.size > 0) startScan(5);
+  }
+
+  function scanCandidates() {
+    const list = [...dir.values()].sort((a, b) => (a.rank ?? 9999) - (b.rank ?? 9999));
+    const fresh = (t) => { const s = scans.get(t); return s && daysAgo(s.scannedAt) < CFG.staleDays; };
+    const never = list.filter((d) => !scans.has(d.ticker));
+    const stale = list.filter((d) => scans.has(d.ticker) && !fresh(d.ticker))
+      .sort((a, b) => Date.parse(scans.get(a.ticker).scannedAt || 0) - Date.parse(scans.get(b.ticker).scannedAt || 0));
+    return [...never, ...stale].map((d) => d.ticker);
+  }
+
+  let scanJob = null;
+  async function startScan(count, only) {
+    if (scanJob) return;
+    $("alert").hidden = true;
+    const queue = only ? [only] : scanCandidates().slice(0, count);
+    if (!queue.length) { renderScanStatus("Toate acțiunile din listă au fost scanate în ultimele zile."); return; }
+    scanJob = { stop: false, done: 0, total: queue.length, current: null };
+    renderScanBar();
+    renderScanStatus();
+    const mcp = await mcpReady;
+    let stopMsg = null;
+    if (!mcp) stopMsg = AV_COPY("").no_mcp;
+    for (const t of mcp ? queue : []) {
+      if (scanJob.stop) break;
+      scanJob.current = t;
+      renderScanStatus();
+      try {
+        const weeks = await getWeekly(mcp, t);
+        await saveScan(t, scanRecord(t, weeks));
+      } catch (e) {
+        const kind = (e && e.kind) || "upstream_error";
+        if (FATAL.has(kind)) { stopMsg = AV_COPY(t)[kind] || AV_COPY(t).server_unavailable; break; }
+        await saveScan(t, { ticker: t, scannedAt: new Date().toISOString(), error: kind });
+      }
+      scanJob.done++;
+    }
+    const done = scanJob.done;
+    scanJob = null;
+    renderScanBar();
+    renderScanStatus(stopMsg ? null : `Gata: ${done} ${done === 1 ? "acțiune scanată" : "acțiuni scanate"}.`);
+    if (stopMsg) showAlert(stopMsg[0], stopMsg[1]);
+    renderDirectory();
   }
 
   // ---------- Claude ----------
   function change(c, i, k) { return i - k >= 0 ? c[i] / c[i - k] - 1 : null; }
-  const r4 = (x) => (fin(x) ? Math.round(x * 10000) / 10000 : null);
 
   function claudePrompt(entry, a) {
     const { ind, i, scores, rule, odds } = a;
     const facts = {
       ticker: entry.ticker,
-      company: entry.overview && entry.overview.name,
+      company: (entry.overview && entry.overview.name) || (dir.get(entry.ticker) || {}).name || null,
       week_of: entry.weeks[i].d,
       price: r4(ind.c[i]),
       horizon: `${CFG.horizon} săptămâni (~20 de zile de tranzacționare)`,
@@ -843,7 +1141,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
         bollinger_pct_b: r4(ind.pctB[i]),
         volume_vs_20w_avg: r4(ind.volRatio[i]),
       },
-      scores_minus100_to_100: Object.fromEntries(Object.entries(scores).map(([k, v]) => [k, fin(v) ? Math.round(v * 10) / 10 : null])),
+      scores_minus100_to_100: Object.fromEntries(Object.entries(scores).map(([k, v]) => [k, r1(v)])),
       rule_based_decision: rule,
       historical_odds_technical_only: odds ? {
         prob_up_when_score_similar: r4(odds.prob),
@@ -912,7 +1210,158 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
   let sample = null;
   let sampleOff = false;
 
-  // ---------- rendering ----------
+  // ---------- rendering: ranking & directory ----------
+  function sigChip(d, title) {
+    return el("span", { class: "sig", "data-d": d, title }, el("span", { "aria-hidden": "true", text: GLYPH[d] }), d);
+  }
+
+  function sparkline(vals) {
+    const s = sv("svg", { viewBox: "0 0 160 34", preserveAspectRatio: "none", "aria-hidden": "true" });
+    const v = vals.filter(fin);
+    if (v.length < 2) return s;
+    const lo = Math.min(...v), hi = Math.max(...v), span = hi - lo || 1;
+    const x = (i) => 2 + (i / (v.length - 1)) * 152;
+    const y = (p) => 3 + (1 - (p - lo) / span) * 28;
+    const line = v.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p).toFixed(1)}`).join("");
+    s.append(
+      sv("path", { d: `${line}L${x(v.length - 1).toFixed(1)},34L${x(0).toFixed(1)},34Z`, fill: "var(--s1)", "fill-opacity": "0.10", stroke: "none" }),
+      sv("path", { d: line, fill: "none", stroke: "var(--s1)", "stroke-width": 1.6, "stroke-linejoin": "round", "vector-effect": "non-scaling-stroke" }),
+      sv("circle", { cx: x(v.length - 1), cy: y(v[v.length - 1]), r: 2.6, fill: "var(--s1)" }),
+    );
+    return s;
+  }
+
+  function ranked() {
+    return [...scans.values()]
+      .filter((s) => !s.error && fin(s.prob) && s.n >= CFG.minSamples)
+      .sort((a, b) => b.prob - a.prob || (b.prob - b.base) - (a.prob - a.base));
+  }
+
+  function nameOf(t) { return (dir.get(t) || {}).name || ""; }
+
+  function renderRanking() {
+    const box = $("cards");
+    if (dbOff) {
+      box.replaceChildren(el("div", { class: "empty" },
+        el("p", { text: "Clasamentul și lista de acțiuni nu sunt disponibile în această vizualizare. Poți analiza în continuare orice acțiune din căsuța de sus." })));
+      renderScanBar();
+      return;
+    }
+    const all = ranked();
+    const fresh = all.filter((s) => daysAgo(s.scannedAt) < CFG.staleDays + 2);
+    const top = (fresh.length >= 3 ? fresh : all).slice(0, 6);
+    if (!top.length) {
+      box.replaceChildren(el("div", { class: "empty" },
+        el("p", { text: scanJob ? "Scanez primele acțiuni, clasamentul apare imediat…" : !dirReady ? "Se încarcă lista de acțiuni…" : "Încă nu e nicio acțiune scanată. Scanarea folosește o cerere Alpha Vantage pentru fiecare acțiune." }),
+        !scanJob && dirReady ? el("button", { class: "btn small", type: "button", text: "Scanează primele 5", onclick: () => startScan(5) }) : null));
+    } else {
+      box.replaceChildren(el("div", { class: "cards" }, top.map((s) => {
+        const edge = s.prob - s.base;
+        return el("button", { class: "card", type: "button", onclick: () => openStock(s.ticker),
+          "aria-label": `${s.ticker} ${nameOf(s.ticker)}: ${pct(s.prob)} șanse istorice de creștere în 4 săptămâni` },
+          el("div", { class: "card-top" }, el("span", { class: "card-t", text: s.ticker }),
+            s.full ? sigChip(s.full.decision, `analiza completă (${s.full.by})`) : sigChip(s.rule, "semnal tehnic")),
+          el("span", { class: "card-nm", text: nameOf(s.ticker) || " " }),
+          el("span", { class: "card-p", text: pct(s.prob) }),
+          el("span", { class: "card-sub", text: `de obicei ${pct(s.base)} · ${edge >= 0 ? "+" : "−"}${Math.abs(edge * 100).toFixed(0)} pp` }),
+          sparkline(s.spark || []),
+          el("span", { class: "card-sub", text: `6 luni ${spct(s.chg26w, 0)} · scanat ${whenText(s.scannedAt)}` }));
+      })));
+    }
+    renderScanBar();
+  }
+
+  function renderScanBar() {
+    const bar = $("scanbar");
+    if (dbOff) { bar.replaceChildren(); return; }
+    const total = dir.size;
+    const doneFresh = [...dir.keys()].filter((t) => scans.has(t) && daysAgo(scans.get(t).scannedAt) < CFG.staleDays).length;
+    const sel = el("select", { class: "field", id: "scanCount", "aria-label": "Câte acțiuni scanez" },
+      [3, 5, 10, 15].map((n) => el("option", { value: n, text: `${n} acțiuni`, selected: n === 5 })));
+    const prevSel = document.getElementById("scanCount");
+    if (prevSel) sel.value = prevSel.value;
+    const controls = scanJob
+      ? [el("button", { class: "btn ghost small", type: "button", text: "Oprește scanarea", onclick: () => { if (scanJob) scanJob.stop = true; } })]
+      : [sel, el("button", { class: "btn small", type: "button", text: "Scanează", disabled: !dirReady, onclick: () => startScan(Number(sel.value) || 5) })];
+    bar.replaceChildren(el("span", { class: "num", text: `Scanate: ${doneFresh} din ${total}` }), ...controls);
+  }
+
+  function renderScanStatus(msg) {
+    const box = $("scanStatus");
+    if (scanJob) {
+      box.replaceChildren(el("span", { class: "spinner", "aria-hidden": "true" }),
+        el("span", { text: `Scanez ${scanJob.current || "…"} (${Math.min(scanJob.done + 1, scanJob.total)} din ${scanJob.total}). O cerere pe acțiune, la 1,3 secunde distanță.` }));
+      box.hidden = false;
+    } else if (msg) {
+      const left = Math.max(0, 25 - callsToday());
+      box.replaceChildren(el("span", { text: `${msg} Îți mai rămân cam ${left} cereri Alpha Vantage azi (în acest browser).` }));
+      box.hidden = false;
+    } else {
+      box.hidden = true;
+    }
+  }
+
+  function renderDirectory() {
+    const body = $("dirBody");
+    if (dbOff) { $("directory").hidden = true; return; }
+    $("directory").hidden = false;
+    const q = norm($("dirQuery").value.trim());
+    const sort = $("dirSort").value;
+    const rows = [...dir.values()].filter((d) => !q || norm(`${d.ticker} ${d.name} ${d.sector}`).includes(q));
+    const chance = (t) => { const s = scans.get(t); return s && !s.error && fin(s.prob) ? s.prob : -1; };
+    rows.sort(sort === "name" ? (a, b) => a.name.localeCompare(b.name, "ro")
+      : sort === "rank" ? (a, b) => (a.rank ?? 9999) - (b.rank ?? 9999)
+      : (a, b) => chance(b.ticker) - chance(a.ticker) || (a.rank ?? 9999) - (b.rank ?? 9999));
+    $("dirTitle").textContent = `Toate acțiunile (${dir.size})`;
+    if (!dirReady && !dir.size) { body.replaceChildren(el("p", { class: "note", text: "Se încarcă lista…" })); return; }
+    if (!rows.length) { body.replaceChildren(el("p", { class: "note", text: "Nicio acțiune nu se potrivește căutării." })); return; }
+    body.replaceChildren(el("div", { class: "table-box" }, el("table", null,
+      el("thead", null, el("tr", null,
+        el("th", { text: "Simbol" }), el("th", { text: "Companie" }), el("th", { class: "col-sector", text: "Sector" }),
+        el("th", { class: "r", text: "Șanse 4 săpt." }), el("th", { class: "r", text: "De obicei" }),
+        el("th", { text: "Semnal" }), el("th", { class: "col-when", text: "Scanat" }))),
+      el("tbody", null, rows.map((d) => {
+        const s = scans.get(d.ticker);
+        const ok = s && !s.error && fin(s.prob);
+        const signal = s && s.full ? sigChip(s.full.decision, `analiza completă (${s.full.by})`)
+          : ok ? sigChip(s.rule, "semnal tehnic") : null;
+        const canScan = !scanJob && (!s || daysAgo(s.scannedAt) >= CFG.staleDays);
+        return el("tr", { onclick: () => openStock(d.ticker) },
+          el("td", null, el("button", { class: "linkbtn", type: "button", text: d.ticker,
+            onclick: (ev) => { ev.stopPropagation(); openStock(d.ticker); } })),
+          el("td", null, d.name, d.source === "adăugat" ? el("span", { class: "added", text: "adăugat de tine" }) : null),
+          el("td", { class: "col-sector", text: d.sector || "" }),
+          el("td", { class: "r num", text: ok ? pct(s.prob) : s && s.error ? "fără date" : "—" }),
+          el("td", { class: "r num", text: ok ? pct(s.base) : "" }),
+          el("td", null, signal || (canScan
+            ? el("button", { class: "btn ghost tiny", type: "button", text: "Scanează",
+                onclick: (ev) => { ev.stopPropagation(); startScan(1, d.ticker); } })
+            : "")),
+          el("td", { class: "col-when note", text: s ? whenText(s.scannedAt) : "" }));
+      })))));
+  }
+
+  let datalistKey = "";
+  function renderDatalist() {
+    const items = [...dir.values()].sort((a, b) => (a.rank ?? 9999) - (b.rank ?? 9999));
+    const key = items.map((d) => d.ticker).join(",");
+    if (key === datalistKey) return;
+    datalistKey = key;
+    $("stockList").replaceChildren(...items.map((d) => el("option", { value: d.ticker, label: d.name })));
+  }
+
+  function resolveTicker(raw) {
+    const s = String(raw || "").trim();
+    if (!s) return null;
+    const up = s.toUpperCase();
+    if (dir.has(up)) return up;
+    const q = norm(s);
+    const hit = [...dir.values()].filter((d) => norm(d.name).includes(q)).sort((a, b) => (a.rank ?? 9999) - (b.rank ?? 9999))[0];
+    if (hit) return hit.ticker;
+    return TICKER_RE.test(up) ? up : null;
+  }
+
+  // ---------- rendering: detail ----------
   const STEPS = [
     ["weekly", "Prețuri săptămânale"],
     ["overview", "Date fundamentale"],
@@ -925,8 +1374,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     if (li) li.dataset.s = s;
   }
   function resetSteps() {
-    const ul = $("steps");
-    ul.replaceChildren(...STEPS.map(([id, label]) => el("li", { "data-id": id, "data-s": "pending", text: label })));
+    $("steps").replaceChildren(...STEPS.map(([id, label]) => el("li", { "data-id": id, "data-s": "pending", text: label })));
     $("progress").hidden = false;
   }
 
@@ -937,28 +1385,28 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
   }
 
   const AV_COPY = (t) => ({
-    server_not_connected: ["Conectorul Alpha Vantage lipsește", "Adaugă Alpha Vantage în claude.ai → Settings → Connectors, apoi apasă din nou Analizează."],
-    needs_reauth: ["Conexiunea Alpha Vantage a expirat", "Reconectează Alpha Vantage în claude.ai → Settings → Connectors, apoi apasă din nou Analizează."],
-    selection_required: ["Alege conexiunea Alpha Vantage", "Ai mai multe conexiuni Alpha Vantage. Alege una când ești întrebat, apoi apasă din nou Analizează."],
+    server_not_connected: ["Conectorul Alpha Vantage lipsește", "Adaugă Alpha Vantage în claude.ai → Settings → Connectors, apoi încearcă din nou."],
+    needs_reauth: ["Conexiunea Alpha Vantage a expirat", "Reconectează Alpha Vantage în claude.ai → Settings → Connectors, apoi încearcă din nou."],
+    selection_required: ["Alege conexiunea Alpha Vantage", "Ai mai multe conexiuni Alpha Vantage. Alege una când ești întrebat, apoi încearcă din nou."],
     not_in_manifest: ["Accesul la Alpha Vantage nu e permis", "Pagina nu are voie să folosească Alpha Vantage. Reîncarcă pagina și permite accesul când ești întrebat."],
     blocked_by_policy: ["Conector blocat", "Organizația ta nu permite folosirea Alpha Vantage aici."],
     approval_required: ["Conector blocat", "Organizația ta cere aprobare pentru fiecare cerere Alpha Vantage, iar paginile nu o pot cere încă."],
     server_unavailable: ["Alpha Vantage nu răspunde", "Serviciul nu răspunde acum. Încearcă din nou peste un minut."],
-    av_quota: ["Limita gratuită Alpha Vantage e atinsă", "Planul gratuit permite 25 de cereri pe zi și cel mult una pe secundă. Încearcă din nou mâine sau folosește o cheie premium."],
+    upstream_error: ["Alpha Vantage nu răspunde", "Serviciul nu răspunde acum. Încearcă din nou peste un minut."],
+    av_quota: ["Limita gratuită Alpha Vantage e atinsă", "Planul gratuit permite 25 de cereri pe zi și cel mult una pe secundă. Continuă mâine sau folosește o cheie premium."],
     av_premium: ["Date disponibile doar cu abonament", "Alpha Vantage oferă aceste date doar pe planurile premium."],
-    no_data: ["Simbol necunoscut", `Nu am găsit date pentru ${t}. Verifică simbolul (de exemplu AAPL, MSFT, NVDA).`],
+    no_data: ["Simbol necunoscut", `Nu am găsit date pentru ${t}. Verifică simbolul sau caută după nume (de exemplu Apple, Microsoft).`],
     short_history: ["Istoric prea scurt", `${t} are prea puțin istoric pentru analiză (e nevoie de cel puțin un an de date săptămânale).`],
     no_mcp: ["Datele live nu sunt disponibile aici", "Pagina citește datele prin conectorul tău Alpha Vantage. Deschide-o din claude.ai, logat în contul tău."],
   });
 
   function renderRecent() {
     const list = store.get(K.recent) || [];
-    const box = $("recent");
-    box.replaceChildren(...(list.length ? [el("span", { text: "Recente:" })] : []),
+    $("recent").replaceChildren(...(list.length ? [el("span", { text: "Recente:" })] : []),
       ...list.map((t) => el("button", {
-        class: "chip", type: "button", text: t,
+        class: "chip", type: "button", text: t, title: nameOf(t) || null,
         "aria-current": state.entry && state.entry.ticker === t ? "true" : null,
-        onclick: () => { $("ticker").value = t; run(t); },
+        onclick: () => openStock(t),
       })));
   }
   function pushRecent(t) {
@@ -970,7 +1418,6 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
 
   function renderAll() {
     const { entry, a } = state;
-    $("intro").hidden = true;
     $("result").hidden = false;
     renderVerdict(entry, a);
     renderChart(entry, a);
@@ -983,18 +1430,20 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     renderRecent();
   }
 
-  function finalDecision() {
-    const v = state.claude.status === "done" ? state.claude.verdict : null;
-    return v ? { d: v.decision, by: "Claude", v } : { d: state.a.rule, by: "reguli", v: null };
+  function finalDecisionFor(entry, a) {
+    const v = entry === state.entry && state.claude.status === "done" ? state.claude.verdict
+      : entry.claude && entry.claude.verdict ? entry.claude.verdict : null;
+    return v ? { d: v.decision, by: "Claude", v } : { d: a.rule, by: "reguli", v: null };
   }
 
   function renderVerdict(entry, a) {
     const o = entry.overview;
-    const fd = finalDecision();
+    const fd = finalDecisionFor(entry, a);
     const last = entry.weeks[a.i];
+    const name = (o && o.name) || nameOf(entry.ticker);
     const nameBlock = el("div", null,
       el("div", { class: "stock-name", text: entry.ticker }),
-      el("div", { class: "stock-sub", text: [o && o.name, o && o.exchange].filter(Boolean).join(" · ") || "Acțiune" }),
+      el("div", { class: "stock-sub", text: [name, o && o.exchange].filter(Boolean).join(" · ") || "Acțiune" }),
       el("div", { class: "stock-price" }, money(last.c), " ", el("small", { text: `${(o && o.currency) || ""} · săptămâna ${fmtDate(last.d)}`.trim() })),
     );
     const byText = fd.by === "Claude"
@@ -1030,6 +1479,14 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     return out;
   }
 
+  function swatch(se) {
+    const s = sv("svg", { width: 18, height: 10, viewBox: "0 0 18 10", "aria-hidden": "true" });
+    const l = sv("line", { x1: 1, x2: 17, y1: 5, y2: 5, stroke: se.color, "stroke-width": 2.5, "stroke-linecap": "round" });
+    if (se.dash) l.setAttribute("stroke-dasharray", se.dash === "2 5" ? "1.5 3.5" : "5 3");
+    s.append(l);
+    return s;
+  }
+
   function renderChart(entry, a) {
     const { ind } = a;
     const n = Math.min(104, entry.weeks.length);
@@ -1048,7 +1505,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     const pad = (hi - lo) * 0.06 || 1;
     lo -= pad; hi += pad;
     const ticks = niceTicks(lo, hi, 5);
-    const x = (i) => m.l + (i / (n - 1)) * (W - m.l - m.r);
+    const x = (i) => m.l + (i / Math.max(1, n - 1)) * (W - m.l - m.r);
     const y = (v) => m.t + (1 - (v - lo) / (hi - lo)) * (H - m.t - m.b);
 
     const svg = sv("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", tabindex: "0",
@@ -1084,7 +1541,6 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       if (se.dash) path.setAttribute("stroke-dasharray", se.dash);
       svg.append(path);
     }
-    // End labels, pushed apart so they never collide.
     const ends = series.map((se) => ({ se, v: se.vals[n - 1] })).filter((e) => fin(e.v))
       .map((e) => ({ ...e, y: y(e.v) })).sort((p, q) => p.y - q.y);
     for (let k = 1; k < ends.length; k++) if (ends[k].y - ends[k - 1].y < 15) ends[k].y = ends[k - 1].y + 15;
@@ -1096,12 +1552,10 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     }
     svg.append(sv("circle", { cx: x(n - 1), cy: y(series[0].vals[n - 1]), r: 4.5, fill: "var(--s1)", stroke: "var(--surface)", "stroke-width": 2 }));
 
-    // Hover layer: crosshair + one tooltip listing every series.
     const cross = sv("line", { y1: m.t, y2: H - m.b, stroke: "var(--muted)", "stroke-width": 1, visibility: "hidden" });
     const dots = series.map((se) => sv("circle", { r: 4, fill: se.color, stroke: "var(--surface)", "stroke-width": 2, visibility: "hidden" }));
     svg.append(cross, ...dots);
-    const hit = sv("rect", { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: "transparent" });
-    svg.append(hit);
+    svg.append(sv("rect", { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: "transparent" }));
 
     const wrap = $("chartWrap");
     const tip = el("div", { class: "tip", hidden: true });
@@ -1143,7 +1597,6 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       } else if (ev.key === "Escape") hide();
     });
 
-    // Table view of the same data (last 12 weeks).
     const rows = [];
     for (let i = n - 1; i >= Math.max(0, n - 12); i--) {
       rows.push(el("tr", null, el("td", { class: "num", text: fmtDate(dates[i]) }),
@@ -1152,14 +1605,6 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     $("chartTable").replaceChildren(el("table", null,
       el("thead", null, el("tr", null, el("th", { text: "Săptămâna" }), ...series.map((se) => el("th", { class: "r", text: se.name })))),
       el("tbody", null, rows)));
-  }
-
-  function swatch(se) {
-    const s = sv("svg", { width: 18, height: 10, viewBox: "0 0 18 10", "aria-hidden": "true" });
-    const l = sv("line", { x1: 1, x2: 17, y1: 5, y2: 5, stroke: se.color, "stroke-width": 2.5, "stroke-linecap": "round" });
-    if (se.dash) l.setAttribute("stroke-dasharray", se.dash === "2 5" ? "1.5 3.5" : "5 3");
-    s.append(l);
-    return s;
   }
 
   function renderIndicators(a) {
@@ -1180,8 +1625,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
 
   function renderScores(a) {
     const rows = [...Object.keys(NAMES).map((k) => [NAMES[k], a.scores[k], false]), ["Compus", a.scores.composite, true]];
-    const box = $("scores");
-    box.replaceChildren(
+    $("scores").replaceChildren(
       ...rows.map(([label, v, total]) => {
         const track = el("div", { class: "track", role: "img", "aria-label": `${label}: ${fin(v) ? sscore(v) : "fără date"}` }, el("span", { class: "zero" }));
         if (total) {
@@ -1219,7 +1663,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
   function renderFundamentals(entry) {
     const f = entry.overview;
     if (!f) {
-      $("fundamentals").replaceChildren(el("p", { class: "note", text: entry.overviewError || "Fără date fundamentale pentru acest simbol." }));
+      $("fundamentals").replaceChildren(el("p", { class: "note", text: entry.overviewError || "Fără date fundamentale pentru acest simbol (de exemplu la ETF-uri)." }));
       return;
     }
     const rows = [
@@ -1262,7 +1706,6 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
   }
 
   function renderClaude() {
-    const box = $("claude");
     const c = state.claude;
     const a = state.a;
     const kids = [];
@@ -1273,13 +1716,13 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       kids.push(el("p", { text: "Semnalul regulilor e clar, așa că Claude nu a fost consultat." }));
     }
     if (c.status === "thinking") {
-      kids.push(el("div", { class: "thinking" }, el("span", { text: `Claude analizează… ${c.elapsed || 0} s` }),
+      kids.push(el("div", { class: "thinking" }, el("span", { class: "spinner", "aria-hidden": "true" }), el("span", { text: `Claude analizează… ${c.elapsed || 0} s` }),
         el("button", { class: "btn ghost small", type: "button", text: "Oprește", onclick: () => state.ctl && state.ctl.abort() })));
     } else if (c.status === "done") {
       const v = c.verdict;
       kids.push(el("div", { class: "claude-answer" },
         el("div", { class: "claude-line" },
-          el("span", { class: "pill", "data-d": v.decision }, el("span", { "aria-hidden": "true", text: GLYPH[v.decision] }), v.decision),
+          sigChip(v.decision),
           el("span", { class: "num", text: fin(v.probability_up_pct) ? `${v.probability_up_pct}% șanse de creștere` : "" }),
           el("span", { class: "note", text: `încredere ${CONF[v.confidence]}` })),
         v.reasoning ? el("p", { class: "claude-text", text: v.reasoning }) : null,
@@ -1293,7 +1736,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       const label = c.status === "done" ? "Întreabă din nou" : c.status === "error" ? "Încearcă din nou" : a.reasons.length ? "Cere opinia lui Claude" : "Cere totuși opinia lui Claude";
       kids.push(el("div", null, el("button", { class: "btn ghost small", type: "button", text: label, onclick: () => askClaude(c.status === "done") })));
     }
-    box.replaceChildren(...kids);
+    $("claude").replaceChildren(...kids);
   }
 
   // ---------- flows ----------
@@ -1314,7 +1757,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     state.timer = setInterval(() => {
       if (state.ctl !== ctl) return;
       state.claude.elapsed = Math.round((Date.now() - t0) / 1000);
-      const span = document.querySelector("#claude .thinking span");
+      const span = document.querySelector("#claude .thinking span:not(.spinner)");
       if (span) span.textContent = `Claude analizează… ${state.claude.elapsed} s`;
     }, 1000);
     setStep("claude", "active");
@@ -1331,7 +1774,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       if (v) {
         result = { status: "done", verdict: v };
         entry.claude = { verdict: v, at: Date.now() };
-        saveEntry(entry);
+        cachePut(K.data(entry.ticker), entry);
       } else {
         result = { status: "error", message: SAMPLE_COPY.invalid_json };
       }
@@ -1342,6 +1785,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
         : SAMPLE_OFF.has(code) ? { status: "off" }
         : { status: "error", message: SAMPLE_COPY[code] || SAMPLE_COPY.upstream_error };
     }
+    if (result.status === "done") recordDetail(entry, a);
     // A newer analysis replaced this one while Claude was answering.
     if (state.ctl !== ctl) return;
     clearInterval(state.timer);
@@ -1352,16 +1796,10 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     renderVerdict(entry, a);
   }
 
-  function saveEntry(entry) {
-    store.set(K.data(entry.ticker), entry);
-  }
-
   async function fetchEntry(mcp, t) {
     setStep("weekly", "active");
     let weeks;
-    try {
-      weeks = parseWeekly(await avCall(mcp, "TIME_SERIES_WEEKLY", { symbol: t, datatype: "json", return_full_data: true }));
-    } catch (e) { setStep("weekly", "fail"); throw e; }
+    try { weeks = await getWeekly(mcp, t); } catch (e) { setStep("weekly", "fail"); throw e; }
     setStep("weekly", "done");
 
     const entry = { ticker: t, day: today(), weeks, overview: null, news: [], overviewError: null, newsError: null, claude: null };
@@ -1389,11 +1827,22 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     return copy ? `${copy[0]}. ${copy[1]}` : "Nu am putut încărca aceste date acum.";
   }
 
+  function scrollToResult() {
+    const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    $("progress").hidden ? $("result").scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" })
+      : $("progress").scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+  }
+
+  function openStock(t) {
+    $("ticker").value = t;
+    run(t, { scroll: true });
+  }
+
   async function run(raw, opts = {}) {
-    const t = String(raw || "").trim().toUpperCase();
     $("alert").hidden = true;
-    if (!/^[A-Z0-9][A-Z0-9.\-]{0,9}$/.test(t)) {
-      showAlert("Simbol invalid", "Scrie simbolul bursier al acțiunii, de exemplu AAPL, MSFT sau NVDA.");
+    const t = resolveTicker(raw);
+    if (!t) {
+      showAlert("Nu am găsit acțiunea", "Scrie simbolul (de exemplu AAPL) sau numele companiei (de exemplu Apple).");
       return;
     }
     if (state.busy) return;
@@ -1409,6 +1858,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       const cached = entry && entry.day === today() && Array.isArray(entry.weeks) && entry.weeks.length;
       if (!cached) {
         resetSteps();
+        if (opts.scroll) scrollToResult();
         const mcp = await mcpReady;
         if (!mcp) throw new AvError("no_mcp", "no mcp");
         entry = await fetchEntry(mcp, t);
@@ -1416,16 +1866,20 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       setStep("calc", "active");
       const a = analyze(entry);
       setStep("calc", "done");
-      if (!cached) saveEntry(entry);
+      if (!cached) cachePut(K.data(t), entry);
       pushRecent(t);
       state.entry = entry;
       state.a = a;
       state.claude = entry.claude && entry.claude.verdict ? { status: "done", verdict: entry.claude.verdict } : { status: "idle" };
       if (cached) $("progress").hidden = true;
       renderAll();
+      if (opts.scroll && cached) scrollToResult();
+      const known = scans.get(t);
+      const lastWeek = entry.weeks[entry.weeks.length - 1].d;
+      if (!opts.quiet && !(cached && known && known.full && known.full.week === lastWeek)) recordDetail(entry, a);
       if (!cached) {
-        if (a.reasons.length && !opts.noClaude) await sampleReady;
-        if (a.reasons.length && sample && !sampleOff && !opts.noClaude && state.entry === entry) askClaude(false);
+        if (a.reasons.length) await sampleReady;
+        if (a.reasons.length && sample && !sampleOff && state.entry === entry) askClaude(false);
         else setStep("claude", "skip");
       }
     } catch (e) {
@@ -1433,7 +1887,10 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       const copy = AV_COPY(t)[kind];
       if (copy) showAlert(copy[0], copy[1]);
       else showAlert("Analiza nu a reușit", `A apărut o eroare neașteptată${e && e.message ? `: ${e.message}` : ""}. Încearcă din nou.`);
-      if (!state.entry) $("progress").hidden = true;
+      if (kind === "no_data" || kind === "short_history") {
+        dbWrite(`scans/${t}`, { ticker: t, scannedAt: new Date().toISOString(), error: kind });
+      }
+      $("progress").hidden = true;
     } finally {
       state.busy = false;
       $("go").disabled = false;
@@ -1442,18 +1899,29 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
 
   $("form").addEventListener("submit", (ev) => {
     ev.preventDefault();
-    run($("ticker").value);
+    run($("ticker").value, { scroll: true });
   });
+  let dirTimer = null;
+  $("dirQuery").addEventListener("input", () => { clearTimeout(dirTimer); dirTimer = setTimeout(renderDirectory, 120); });
+  $("dirSort").addEventListener("change", renderDirectory);
 
   renderQuota();
   renderRecent();
+  renderRanking();
+  renderDirectory();
   sampleReady.then((s) => {
     sample = s;
     if (!s) sampleOff = true;
     if (state.a) renderClaude();
   });
-  const last = store.get(K.last) || "AAPL";
-  $("ticker").value = last;
-  run(last);
+  initDb();
+
+  // Re-open the last analysis only if today's data is already in this browser (costs nothing).
+  const last = store.get(K.last);
+  if (last) {
+    $("ticker").value = last;
+    const entry = store.get(K.data(last));
+    if (entry && entry.day === today() && Array.isArray(entry.weeks) && entry.weeks.length) run(last, { quiet: true });
+  }
 })();
 </script>

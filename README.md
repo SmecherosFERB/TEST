@@ -85,6 +85,10 @@ vine de la Claude, din contul acelei persoane. Diferențe față de versiunea Py
   medii pe 10 și 40 de săptămâni, orizont de 4 săptămâni, statistică pe ultimii 10 ani;
 - fundamentalele vin din `COMPANY_OVERVIEW` (fără raportul datorii/capital);
 - rezultatele unei zile se păstrează în browser, ca să nu consume din cele 25 de cereri pe zi.
+- pagina principală arată **„Șanse mari acum”**: clasamentul acțiunilor scanate după cât de des au urcat
+  în 4 săptămâni în situații tehnice similare; scanarea costă o cerere Alpha Vantage pe acțiune;
+- ține minte **~115 acțiuni importante cu numele lor** (căutare după nume sau simbol) în baza de date a paginii,
+  plus rezultatele scanărilor; acțiunile noi analizate se adaugă singure în listă. Lista inițială e în `web/stocks.json`.
 
 ## Limitări (de citit)
 
