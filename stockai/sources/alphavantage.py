@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 from datetime import date
 from typing import Any
 
@@ -35,6 +37,20 @@ class AlphaVantage:
 
     def earnings(self, symbol: str) -> list[dict[str, Any]]:
         return parse_earnings(self._get("EARNINGS", symbol=symbol))
+
+    def next_earnings(self, symbol: str) -> date | None:
+        """Data următorului raport (EARNINGS_CALENDAR răspunde doar în format CSV)."""
+        self.limiter.wait()
+        try:
+            resp = self.session.get(
+                BASE_URL,
+                params={"function": "EARNINGS_CALENDAR", "symbol": symbol, "horizon": "3month", "apikey": self.api_key},
+                timeout=30,
+            )
+            resp.raise_for_status()
+        except requests.RequestException as exc:
+            raise DataError(f"Alpha Vantage indisponibil (EARNINGS_CALENDAR): {exc}") from exc
+        return parse_earnings_calendar(resp.text, symbol)
 
     def insiders(self, symbol: str) -> list[dict[str, Any]]:
         return parse_insiders(self._get("INSIDER_TRANSACTIONS", symbol=symbol))
@@ -121,3 +137,19 @@ def classify_insiders(rows: list[dict[str, Any]], close: pd.Series, tolerance: f
             out.append({"date": r["date"], "owner": r["owner"], "title": r["title"], "code": code,
                         "shares": r["shares"], "price": price})
     return out
+
+
+def parse_earnings_calendar(text: str, symbol: str, today: date | None = None) -> date | None:
+    """Primul raport programat de azi încolo pentru `symbol`. Orice alt răspuns (limită, eroare) dă None."""
+    today = today or date.today()
+    upcoming = []
+    for row in csv.DictReader(io.StringIO((text or "").strip())):
+        if str(row.get("symbol", "")).upper() != symbol.upper():
+            continue
+        try:
+            d = date.fromisoformat(str(row.get("reportDate", ""))[:10])
+        except ValueError:
+            continue
+        if d >= today:
+            upcoming.append(d)
+    return min(upcoming) if upcoming else None

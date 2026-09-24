@@ -24,7 +24,7 @@ furnizorului înainte să plătești ceva.
 | Trendul S&P 500 (SPY) | da | da |
 | Model de probabilitate verificat walk-forward și recalibrat pe anii nevăzuți | da (`--train`) | da (învață din acțiunile scanate) |
 | Ținta „bate S&P 500” (randament relativ) | da (`--train --target beat`) | da |
-| Data următorului raport trimestrial (avertizare) | da (Twelve Data) | da (Twelve Data) |
+| Data următorului raport trimestrial (avertizare) | da (Twelve Data, altfel calendarul Alpha Vantage) | da (Twelve Data, altfel calendarul Alpha Vantage) |
 
 ## Ce îmbunătățește realist predicția
 

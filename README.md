@@ -155,7 +155,7 @@ din contul acelei persoane.
 
 Costul în cereri: scanarea, 1 cerere Twelve Data pe acțiune (planul gratuit are 800 pe zi, dar maximum 8 pe minut,
 deci ~8 secunde pe acțiune). Prima analiză completă a unei acțiuni: 4 cereri Twelve Data (prețuri, fundamentale,
-rezultate, insideri) și 1 Alpha Vantage (știri). Datorită cache-ului, analizele următoare costă mai puțin.
+rezultate, insideri) și 1–2 Alpha Vantage (știri; calendarul rezultatelor, doar dacă Twelve Data nu dă data raportului următor). Datorită cache-ului, analizele următoare costă mai puțin.
 
 ## Limitări (de citit)
 

@@ -150,6 +150,9 @@ class _FakeAV:
         self.calls += 1
         return parse_earnings(AV_EARNINGS)
 
+    def next_earnings(self, symbol):
+        return date(2026, 10, 30)
+
 
 def test_market_data_caches_earnings_on_disk(tmp_path):
     md = MarketData(cache=DiskCache(tmp_path))
@@ -158,6 +161,7 @@ def test_market_data_caches_earnings_on_disk(tmp_path):
     second = md.earnings("AAPL")
     assert md.av.calls == 1
     assert second[0]["reported"] == first[0]["reported"] == date(2026, 7, 30)
+    assert md.next_earnings("AAPL") == date(2026, 10, 30)
 
 
 class _FakeTD:
@@ -224,6 +228,18 @@ def test_twelve_data_statistics_earnings_insiders():
     assert parse_next_earnings(upcoming, today=date(2026, 9, 24)) == date(2026, 10, 29)
     assert parse_next_earnings(upcoming, today=date(2026, 11, 1)) == date(2027, 1, 28)
     assert parse_next_earnings({"earnings": []}) is None
+
+    from stockai.sources.alphavantage import parse_earnings_calendar
+
+    cal = ("symbol,name,reportDate,fiscalDateEnding,estimate,currency,timeOfTheDay\r\n"
+           'TSLA,"Tesla, Inc",2026-10-21,2026-09-30,0.55,USD,post-market\r\n'
+           "TSLA,Tesla,2027-01-27,2026-12-31,0.7,USD,post-market\r\n")
+    assert parse_earnings_calendar(cal, "TSLA", today=date(2026, 9, 24)) == date(2026, 10, 21)
+    assert parse_earnings_calendar(cal, "AAPL", today=date(2026, 9, 24)) is None
+    # răspunsul la limita zilnică vine tot ca CSV, dar fără rânduri valide
+    limit = "symbol,name,reportDate,fiscalDateEnding,estimate,currency,timeOfTheDay\r\nI,n,f,o,r,m,a\r\n"
+    assert parse_earnings_calendar(limit, "AAPL") is None
+    assert parse_earnings_calendar('{"Information": "limit"}', "AAPL") is None
 
     trades = td_insiders({"insider_transactions": [
         {"full_name": "NEWSTEAD JENNIFER", "position": "Officer", "date_reported": "2026-09-15", "shares": 1438,

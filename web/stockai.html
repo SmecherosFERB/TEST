@@ -879,6 +879,32 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     return dates[0] || null;
   }
 
+  // Calendarul Alpha Vantage vine ca CSV („symbol,name,reportDate,…”); numele pot avea virgule între ghilimele.
+  function splitCsv(line) {
+    const out = [];
+    let cur = "", q = false;
+    for (const ch of line) {
+      if (ch === '"') q = !q;
+      else if (ch === "," && !q) { out.push(cur); cur = ""; }
+      else cur += ch;
+    }
+    out.push(cur);
+    return out;
+  }
+  function nextFromCalendar(p, t) {
+    const text = String(p && typeof p === "object" && "result" in p ? p.result : p == null ? "" : p);
+    const lines = text.trim().split(/\r?\n/);
+    const head = splitCsv(lines.shift() || "");
+    const iS = head.indexOf("symbol"), iD = head.indexOf("reportDate");
+    if (iS < 0 || iD < 0) return null;
+    const dates = lines.map(splitCsv)
+      .filter((c) => String(c[iS] || "").toUpperCase() === t)
+      .map((c) => String(c[iD] || "").slice(0, 10))
+      .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d) && d >= today())
+      .sort();
+    return dates[0] || null;
+  }
+
   // Twelve Data descrie fiecare tranzacție („Sale at price…”, „Purchase at price…”, acordări fără descriere).
   function parseTdInsiders(obj) {
     const rows = obj && Array.isArray(obj.insider_transactions) ? obj.insider_transactions : [];
@@ -1794,6 +1820,10 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       } catch (e2) {
         insidersError = sectionError(e2);
       }
+    }
+    // Twelve Data nu dă mereu data raportului următor; atunci o luăm din calendarul Alpha Vantage (opțional).
+    if (!out.next) {
+      try { out.next = nextFromCalendar(await avCall(mcp, "EARNINGS_CALENDAR", { symbol: t, horizon: "3month" }), t); } catch { /* opțional */ }
     }
     if (!earningsError && !insidersError) dbWrite(`events/${t}`, out);
     return { ...out, earningsError, insidersError };

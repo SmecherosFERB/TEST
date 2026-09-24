@@ -169,6 +169,13 @@ class MarketData:
                 report = {"quarters": self.av.earnings(ticker), "next": None}
             except DataError as exc:
                 log.warning("%s", exc)
+        calendar = getattr(self.av, "next_earnings", None)
+        if report is not None and report.get("next") is None and calendar is not None:
+            # Twelve Data nu dă mereu raportul următor; calendarul Alpha Vantage costă o cerere la 3 zile.
+            try:
+                report = {**report, "next": calendar(ticker)}
+            except DataError as exc:
+                log.warning("%s", exc)
         if report is not None:
             nxt = report.get("next")
             report = {"quarters": report.get("quarters"), "next": nxt.isoformat() if hasattr(nxt, "isoformat") else nxt}
