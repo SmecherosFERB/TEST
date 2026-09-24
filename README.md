@@ -75,6 +75,17 @@ Claude: 41% șanse de creștere, decizie SELL
   ...
 ```
 
+## Versiunea web (`web/stockai.html`)
+
+Aceeași logică, rescrisă în JavaScript, publicată ca pagină claude.ai.
+Datele vin prin conectorul Alpha Vantage al celui care deschide pagina, iar a doua opinie
+vine de la Claude, din contul acelei persoane. Diferențe față de versiunea Python:
+
+- folosește **bare săptămânale** (planul gratuit Alpha Vantage nu oferă istoric zilnic complet):
+  medii pe 10 și 40 de săptămâni, orizont de 4 săptămâni, statistică pe ultimii 10 ani;
+- fundamentalele vin din `COMPANY_OVERVIEW` (fără raportul datorii/capital);
+- rezultatele unei zile se păstrează în browser, ca să nu consume din cele 25 de cereri pe zi.
+
 ## Limitări (de citit)
 
 - **Procentul istoric folosește doar scorul tehnic**, pentru că pentru fundamentale și știri nu avem istoric gratuit.
