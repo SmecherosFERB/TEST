@@ -1,0 +1,101 @@
+# Surse de date pentru StockAI
+
+Cercetare făcută în septembrie 2026. Prețurile și limitele se schimbă des, așa că verifică pagina
+furnizorului înainte să plătești ceva.
+
+## Pe scurt
+
+| Prioritate | Ce | Cost | Ce câștigăm |
+|---|---|---|---|
+| 1 | **Twelve Data** prin conectorul claude.ai | gratuit (800 cereri/zi) | istoric zilnic lung în pagină, în loc de date săptămânale; toată lista de ~115 acțiuni scanată într-o zi |
+| 2 | **SEC EDGAR, FRED, FINRA** în programul Python | gratuit, surse oficiale | cumpărări ale insiderilor, context macro, short interest |
+| 3 | **Backtest pe date zilnice** | gratuit | aflăm care semnale chiar ajută, înainte să le dăm pondere |
+| 4 (opțional) | **FMP Starter** sau **Tiingo Power** | ~22–30 $/lună | estimări și surprize la rezultate, istoric zilnic curat |
+| — | **TradingView Lightweight Charts** | gratuit (Apache 2.0) | grafice cu lumânări, zoom, volum |
+
+## Ce îmbunătățește realist predicția
+
+Mai multe surse nu înseamnă automat predicții mai bune. Ce contează:
+
+1. **Istoric zilnic lung, ajustat pentru dividende și split-uri.** Fără el, backtestul și
+   procentele istorice sunt aproximative. Pagina lucrează acum pe date săptămânale, pentru că
+   planul gratuit Alpha Vantage oferă doar ultimele 100 de zile.
+2. **Date fără „survivorship bias”.** Dacă istoricul conține doar companiile care există azi,
+   backtestul iese prea optimist. Seturi ca Sharadar includ și companiile delistate.
+3. **Semnale cu dovezi publicate**, adăugate pe rând și verificate prin backtest:
+   - *momentum 12-1*: acțiunile care au urcat cel mai mult în ultimele 12 luni (fără ultima lună)
+     tind să continue. Recent însă rezultatele au fost amestecate: un test pe acțiuni mari a dat
+     Sharpe negativ și o scădere maximă de −81%;
+   - *drift după rezultate (PEAD)*: prețul continuă în direcția surprizei la rezultatele
+     trimestriale. Efectul a slăbit, dar nu a dispărut;
+   - *cumpărări „oportuniste” ale insiderilor* (Cohen, Malloy, Pomorski, 2012): ~0,82% pe lună
+     randament anormal. Studii mai noi nu reproduc complet rezultatul;
+   - *short interest* ridicat, ca semnal de prudență.
+4. **Așteptări realiste.** McLean și Pontiff (2016) au studiat 97 de semnale publicate:
+   randamentele scad cu 26% în afara perioadei studiate și cu 58% după publicare. Orice semnal
+   „descoperit” trebuie verificat pe date noi.
+
+## Cum se leagă o sursă nouă
+
+- **Pagina din claude.ai** poate citi date **doar prin conectori claude.ai**. Orice altă adresă e
+  blocată de securitatea paginii. Pentru pagină contează deci doar furnizorii care au conector.
+- **Programul Python** poate folosi orice API cu cheie.
+
+Conectori financiari găsiți în directorul claude.ai: Alpha Vantage (conectat), **Twelve Data**
+(conectare începută, dar neterminată), Bigdata.com, FactSet, LSEG, Zacks, viaNexus, Clear Street,
+Daloopa. În afară de Alpha Vantage și Twelve Data, aceștia sunt de regulă servicii profesionale,
+plătite.
+
+## Furnizori de prețuri și date de piață
+
+| Furnizor | Plan gratuit | Plătit, de la | Puncte forte | Unde se poate folosi |
+|---|---|---|---|---|
+| Alpha Vantage | 25 cereri/zi, 1 pe secundă; istoricul zilnic complet e premium | Pro 49,99 $/lună (75 pe minut) | știri cu sentiment, insideri, opțiuni, macro | pagină (conectat), Python |
+| **Twelve Data** | 800 cereri/zi, 8 pe minut; acțiuni SUA, forex, cripto | Grow 29 $/lună | până la 5.000 de puncte pe cerere (~20 de ani zilnic), 100+ indicatori, fundamentale, știri | **pagină (conector)**, Python |
+| Massive (fost Polygon.io) | 5 cereri/minut, 2 ani istoric | Starter 29 $ (5 ani, întârziere 15 min); Developer 79 $ (10 ani); Advanced 199 $ (timp real, 20+ ani) | calitate bună, fișiere în bloc | Python |
+| Financial Modeling Prep | 250 cereri/zi, date de final de zi | Starter ~22 $/lună la plata anuală (300/min, 5 ani); Premium 59 $ (30 ani); Ultimate 149 $ | fundamentale, estimări, rezultate, insideri | Python |
+| Finnhub | 60 cereri/minut; cotații SUA în timp real, știri, fundamentale de bază | Premium ~12–100 $/lună | date alternative, WebSocket | Python |
+| Tiingo | 1.000 cereri/zi, 50 pe oră, 500 simboluri pe lună; 30+ ani istoric zilnic | Power 30 $/lună (uz personal) | istoric zilnic lung și curat | Python |
+| EODHD | 20 cereri/zi | All-In-One 99,99 $/lună (100.000/zi) | acoperire globală, fundamentale | Python |
+| Alpaca | date IEX (~2,5% din volumul SUA), 7+ ani | Algo Trader Plus 99 $/lună (toate bursele, opțiuni) | aceeași platformă permite și tranzacționare de probă | Python |
+| Yahoo Finance (yfinance) | gratuit, neoficial | — | ușor de folosit | Python, doar pentru teste: blocări frecvente (`YFRateLimitError` raportat și în martie 2026) |
+
+## Surse gratuite și oficiale pentru semnale suplimentare
+
+| Sursă | Ce oferă | Limite |
+|---|---|---|
+| **SEC EDGAR** | tranzacții ale insiderilor (Form 4), fundamentale XBRL, toate rapoartele companiilor | gratuit, maximum 10 cereri pe secundă, antet `User-Agent` cu email |
+| **FRED** (Fed St. Louis) | 800.000+ serii macro: dobânzi, inflație, curba randamentelor, șomaj | gratuit cu cheie, 120 cereri pe minut |
+| **FINRA** | short interest de două ori pe lună, volum zilnic vândut în lipsă; arhivă din 2014 | gratuit pentru uz necomercial |
+| Quiver Quantitative | tranzacțiile membrilor Congresului SUA, insideri, lobby | API de la ~10 $/lună; setul de insideri cere planul de 75 $/lună |
+| Sharadar (Nasdaq Data Link) | fundamentale „point-in-time”, inclusiv companii delistate, din 1998 | plătit, preț la cerere; pentru backtest serios |
+
+## Grafice
+
+- **TradingView Lightweight Charts**: bibliotecă open source (Apache 2.0, ~35 KB) pentru grafice
+  cu lumânări, volum și zoom. Se poate încărca în pagina noastră de pe CDN-urile permise.
+  Licența cere menționarea TradingView și un link către tradingview.com.
+- Widget-urile TradingView (iframe) nu merg în pagina din claude.ai, fiindcă iframe-urile sunt
+  blocate. Merg doar pe un site propriu.
+
+## Surse
+
+- Twelve Data: [prețuri](https://twelvedata.com/pricing), [istoric](https://support.twelvedata.com/en/articles/5214728-getting-historical-data), [server MCP](https://github.com/twelvedata/mcp)
+- [Massive (Polygon.io)](https://massive.com/pricing), [rezumat prețuri](https://qveris.ai/guides/polygon-pricing-optimized/)
+- [Financial Modeling Prep](https://site.financialmodelingprep.com/pricing-plans)
+- [Finnhub](https://finnhub.io/pricing)
+- [Tiingo](https://www.tiingo.com/about/pricing)
+- [EODHD](https://eodhd.com/pricing)
+- [Alpaca](https://docs.alpaca.markets/us/docs/about-market-data-api)
+- [Alpha Vantage premium](https://www.alphavantage.co/premium/)
+- [yfinance: blocări](https://github.com/ranaroussi/yfinance/issues/2480)
+- [SEC EDGAR](https://www.sec.gov/search-filings/edgar-search-assistance/accessing-edgar-data)
+- [FRED API](https://freeapihub.com/apis/fred-api)
+- [FINRA short interest](https://www.finra.org/finra-data/browse-catalog/equity-short-interest)
+- [Quiver Quantitative](https://api.quiverquant.com/pricing/)
+- [Sharadar](https://data.nasdaq.com/databases/SFA)
+- [TradingView Lightweight Charts](https://github.com/tradingview/lightweight-charts)
+- [McLean și Pontiff (2016)](https://onlinelibrary.wiley.com/doi/abs/10.1111/jofi.12365)
+- [Cohen, Malloy, Pomorski (2012)](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1692517)
+- [Recenzie PEAD](https://www.sciencedirect.com/science/article/pii/S2214635020303750)
+- [Momentum 12-1 pe acțiuni mari](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5367656)
