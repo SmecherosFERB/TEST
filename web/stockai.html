@@ -929,10 +929,12 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
 
   // Calendarul complet (o cerere Alpha Vantage pe zi, împărțită prin baza de date): data următorului raport
   // pentru toate acțiunile din listă, ca clasamentul să marcheze riscul de raport trimestrial.
-  let calendar = null;
+  let calendar = null, calendarTried = "";
   const nextReport = (t) => { const d = calendar && calendar.next && calendar.next[t]; return typeof d === "string" && d >= today() ? d : null; };
   async function ensureCalendar(mcp) {
-    if (calendar && calendar.day === today()) return calendar;
+    // O singură încercare pe zi și pe deschidere a paginii: la limita Alpha Vantage nu irosim alte cereri.
+    if ((calendar && calendar.day === today()) || calendarTried === today()) return calendar;
+    calendarTried = today();
     try {
       const next = calendarDates(await avCall(mcp, "EARNINGS_CALENDAR", { horizon: "3month" }), new Set(dir.keys()));
       if (Object.keys(next).length) {
@@ -1420,8 +1422,9 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     checks.push({ ok: !suspect.length, label: "Fără split-uri neajustate",
       detail: suspect.length ? `${suspect.length === 1 ? "o zi" : `${suspect.length} zile`} cu salturi de tip split (ultima: ${fmtDate(bars[suspect[suspect.length - 1]].d)}); perioadele din jur nu intră în model` : "nicio mișcare de o zi de tip 2:1, 3:1, 10:1" });
 
+    // Zilnic: cel mult 3 zile lucrătoare de la ultima bară închisă. Săptămânal: ultima săptămână închisă poate avea 8.
     const last = bars[n - 1].d, late = businessDaysSince(last);
-    const stale = late > 3;
+    const stale = late > (daily ? 3 : 8);
     if (stale) penalty += 30;
     checks.push({ ok: !stale, label: "Date la zi", detail: `ultima zi: ${fmtDate(last)}${stale ? ` (acum ${late} zile lucrătoare)` : ""}` });
 
