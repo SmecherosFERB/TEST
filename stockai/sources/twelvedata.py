@@ -42,7 +42,12 @@ class TwelveData:
         return parse_statistics(self._get("statistics", symbol))
 
     def earnings(self, symbol: str) -> list[dict[str, Any]]:
-        return parse_earnings(self._get("earnings", symbol))
+        return self.earnings_report(symbol)["quarters"]
+
+    def earnings_report(self, symbol: str) -> dict[str, Any]:
+        """Trimestrele raportate și data următorului raport, dintr-o singură cerere."""
+        payload = self._get("earnings", symbol)
+        return {"quarters": parse_earnings(payload), "next": parse_next_earnings(payload)}
 
     def insiders(self, symbol: str) -> list[dict[str, Any]]:
         return parse_insiders(self._get("insider_transactions", symbol))
@@ -110,6 +115,22 @@ def parse_earnings(payload: dict[str, Any]) -> list[dict[str, Any]]:
         out.append({"reported": reported, "fiscal_end": None, "eps": eps,
                     "estimate": _num(q.get("eps_estimate")), "surprise_pct": _num(q.get("surprise_prc"))})
     return sorted(out, key=lambda q: q["reported"], reverse=True)
+
+
+def parse_next_earnings(payload: dict[str, Any], today: date | None = None) -> date | None:
+    """Data următorului raport: primul rând de azi încolo care nu are încă EPS efectiv."""
+    today = today or date.today()
+    upcoming = []
+    for q in payload.get("earnings") or []:
+        if _num(q.get("eps_actual")) is not None:
+            continue
+        try:
+            d = date.fromisoformat(str(q.get("date", ""))[:10])
+        except ValueError:
+            continue
+        if d >= today:
+            upcoming.append(d)
+    return min(upcoming) if upcoming else None
 
 
 _PRICE = re.compile(r"price\s+([\d.,]+)", re.IGNORECASE)

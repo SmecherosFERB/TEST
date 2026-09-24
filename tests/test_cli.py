@@ -40,3 +40,27 @@ def test_render_shows_claude_opinion_and_history():
     assert "doar această acțiune: 58% din ~12 cazuri independente" in out
     assert "Claude: 41% șanse de creștere" in out
     assert "Riscuri: volatilitate" in out
+
+
+def test_render_shows_calibrated_models_and_earnings_warning():
+    rec = Recommendation(
+        ticker="MSFT",
+        as_of="2026-09-23",
+        price=512.1,
+        scores={"technical": 40.0, "fundamental": 30.0, "sentiment": None, "earnings": None, "insiders": None,
+                "market": 50.0, "composite": 38.0},
+        rule_decision="BUY",
+        odds=HistoricalOdds(0.61, 0.57, 0.015, 300, 20),
+        extras={"next_earnings": {"date": "2026-10-06", "days": 12}},
+        model={"prob": 0.593, "lo": 0.55, "hi": 0.63, "base_rate": 0.56, "helps": True, "horizon": 20,
+               "trained": {"tickers": 110}},
+        model_beat={"prob": 0.541, "lo": 0.51, "hi": 0.57, "base_rate": 0.51, "helps": False, "horizon": 20,
+                    "trained": {"tickers": 110}},
+        honest={"p": 0.593, "lo": 0.55, "hi": 0.63, "base": 0.56, "edge": 0.033, "sure": None,
+                "stock_p": 0.61, "stock_independent_cases": 15.0, "prior": 0.593, "source": "model"},
+    )
+    out = render(rec)
+    assert "Model statistic: 59% șanse de creștere în 20 zile (interval 90%: 55%–63%, de obicei 56%;" in out
+    assert "a ajutat în test: da" in out
+    assert "Model statistic: 54% șanse să bată S&P 500 în 20 zile" in out and "a ajutat în test: nu încă" in out
+    assert "Următorul raport trimestrial: 2026-10-06 (în 12 zile) · ATENȚIE" in out

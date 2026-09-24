@@ -15,7 +15,7 @@ rezultate trimestriale ──────────► scor rezultate ──�
 tranzacțiile insiderilor ────────► scor insideri ──────┤          │
 S&P 500 + macro (VIX, credit) ───► scor piață ─────────┘          │
                                                                   ▼
-     procent istoric (situații tehnice similare)  +  model statistic antrenat pe ~113 acțiuni
+     procent istoric (situații tehnice similare)  +  model statistic pe ~113 acțiuni (crește? bate S&P 500?)
                                                                   │
                                    semnal neclar? ──► Claude (a doua opinie, cu toate datele)
 ```
@@ -34,11 +34,16 @@ Componentele fără date sunt omise, iar ponderile se recalculează. Scor compus
 ### Probabilitățile
 
 1. **Procent istoric**: cât de des a urcat acțiunea în 20 de zile când scorul tehnic arăta ca azi, față de rata de bază.
-2. **Model statistic** (după `python -m stockai --train`): regresie logistică pe semnale cu dovezi publicate
-   (momentum pe 12 luni, distanța față de maximul pe 52 de săptămâni, volatilitate, trendul pieței, surpriza la rezultate etc.),
-   antrenată pe toată lista de acțiuni. Înainte de salvare e verificată **walk-forward**: pentru fiecare an, modelul învață doar
-   din anii anteriori și e testat pe anul respectiv. Raportul arată dacă bate rata de bază (eroare Brier, AUC, calibrare).
-   Dacă nu o bate, programul te avertizează.
+2. **Model statistic** (după `python -m stockai --train`): regresie logistică cu penalizare pe semnale cu dovezi publicate:
+   momentum pe 12 luni (cu un termen separat după un an slab al pieței), revenirea după ultima lună, apropierea de
+   maximul pe 52 de săptămâni, volatilitate, volum neobișnuit, trendul acțiunii și al pieței, surpriza la rezultate.
+   E antrenat pe toată lista de acțiuni, pentru două întrebări: **crește prețul?** și **bate acțiunea S&P 500?**
+   (`--target beat`). A doua e de obicei mai previzibilă: semnalele spun mai mult despre care acțiuni se descurcă
+   mai bine decât altele decât despre direcția pieței.
+3. **Verificat pe ani nevăzuți, apoi recalibrat.** Pentru fiecare an, modelul învață doar din anii anteriori și e
+   testat pe anul respectiv. Pe rezultatele acestor teste recalibrăm probabilitățile: dacă ordinea dată de model
+   nu a contat sigur statistic, procentele rămân aproape de medie. Raportul arată cât de des s-a întâmplat
+   lucrul estimat în fiecare cincime (de la cele mai slabe 20% la cele mai bune 20% după model).
 
 ### Cât de reale sunt procentele
 
@@ -52,7 +57,9 @@ Trei lucruri fac diferența între un procent care arată bine și unul pe care 
    cu un scor similar (în pagină: acțiunile scanate; în program: modelul antrenat pe toată lista). Asta reduce
    și efectul de „privire înapoi”: acțiunile care au urcat mult în trecut par să urce „de obicei” mai des decât
    o vor face probabil în viitor.
-3. **Verificare pe viitor.** Fiecare predicție (a statisticii și a lui Claude) e salvată și verificată cu
+3. **Acțiunile se mișcă împreună.** În aceeași lună, multe acțiuni urcă sau coboară odată cu piața, așa că
+   1.000 de observații pot valora cât ~200 independente. Modelul măsoară acest efect și lărgește intervalele.
+4. **Verificare pe viitor.** Fiecare predicție (a statisticii și a lui Claude) e salvată și verificată cu
    prețul real după ~4 săptămâni. Pagina arată panoul „Cât de bune au fost predicțiile”; în program rulezi
    `python -m stockai --evaluate`. Comparăm cu „ca de obicei” (eroarea Brier) și verificăm calibrarea: când
    am spus 60%, a urcat chiar în ~60% din cazuri? De la ~100 de predicții verificate, rezultatele devin de încredere.
@@ -65,6 +72,9 @@ Claude e consultat doar când regulile „nu știu ce să facă”:
 - componentele se **contrazic** (ex. tehnic +60, piață -50);
 - istoricul **nu are avantaj** sau are prea puține cazuri, ori **contrazice** regulile;
 - **modelul statistic contrazice** regulile.
+
+Claude primește și data următorului raport trimestrial: dacă acesta cade în următoarele 4 săptămâni, prețul poate sări
+mult în orice direcție, iar programul și pagina te avertizează.
 
 Claude primește tot: indicatori, scoruri, statistica istorică, probabilitatea modelului, rezultate, insideri,
 trendul pieței, macro, fundamentale și știri. Răspunde într-un format fix: decizie, probabilitate, încredere,
@@ -97,6 +107,7 @@ Datele descărcate se păstrează în `.cache/` (prețuri 12 ore, rezultate 3 zi
 ```bash
 python -m stockai --train                 # descarcă istoricul listei, testează modelul, îl salvează
 python -m stockai --train --limit 30      # doar primele 30 de acțiuni (mai rapid)
+python -m stockai --train --target beat   # al doilea model: șansele de a bate S&P 500
 python -m stockai AAPL MSFT NVDA          # analiză; Claude doar la semnalele neclare
 python -m stockai AAPL --always-claude    # Claude la fiecare acțiune
 python -m stockai AAPL --no-claude        # fără costuri Claude
@@ -113,11 +124,13 @@ Exemplu de rezultat:
 ═══ AAPL · 337.02 · 2026-09-23 ═══
 Decizie: HOLD  (decis de Claude, încredere scăzută)
 Scoruri: tehnic +37 · fundamental +42 · sentiment +18 · rezultate +47 · insideri -20 · piață +55 · compus +34
-Model statistic: 58% șanse de creștere în 20 zile (de obicei 56%; antrenat pe 113 acțiuni)
+Model statistic: 58% șanse de creștere în 20 zile (interval 90%: 55%–61%, de obicei 56%; antrenat pe 113 acțiuni; a ajutat în test: da)
+Model statistic: 54% șanse să bată S&P 500 în 20 zile (interval 90%: 51%–57%, de obicei 51%; antrenat pe 113 acțiuni; a ajutat în test: nu încă)
 Istoric (doar tehnic, 20 zile): a urcat în 61% din cazurile similare (rata de bază 57%, n=312, randament mediu +1.8%)
 Piața (S&P 500): în creștere, +2.1% în ultima lună
 Macro: VIX 17.3: piață calmă
 Rezultate: surpriză +7.4% la raportul din 2026-07-30 (acum 56 zile), estimări depășite 4/4 din ultimele trimestre
+Următorul raport trimestrial: 2026-10-29 (în 35 de zile)
 Insideri (180 zile): 0 cumpărări de la 0 persoane ($0), 12 vânzări de la 3 persoane ($5,300,000)
 ...
 ```
@@ -129,6 +142,10 @@ Aceeași logică, rescrisă în JavaScript, publicată ca pagină claude.ai. Dat
 din contul acelei persoane.
 
 - **„Șanse mari acum”**: clasamentul acțiunilor scanate (o cerere pe acțiune), plus trendul S&P 500;
+- **modelul învățat în pagină**: la fiecare scanare, pagina păstrează din 20 în 20 de zile (ferestre care nu se
+  suprapun) semnalele acțiunii și ce a urmat. De la 15 acțiuni scanate, învață din toate, se verifică an cu an pe
+  ani nevăzuți și ordonează clasamentul după **„Crește”** sau **„Bate S&P 500”**. Panoul „Modelul învățat” arată
+  cât de des au reușit cele mai bune 20% față de cele mai slabe 20% și ce semnale au contat;
 - **~115 acțiuni importante cu numele lor** în baza de date a paginii (căutare după nume sau simbol);
   lista e în `stockai/universe.json`, iar acțiunile noi analizate se adaugă singure;
 - analiza completă include rezultatele trimestriale și insiderii (păstrate 7 zile în baza de date) și trendul pieței
@@ -143,6 +160,8 @@ rezultate, insideri) și 1 Alpha Vantage (știri). Datorită cache-ului, analize
 ## Limitări (de citit)
 
 - Procentul istoric folosește doar scorul tehnic; modelul statistic folosește doar semnale care au istoric gratuit.
+- Chiar și cele mai bune modele publicate explică sub 1% din variația randamentelor lunare. Un model bun ridică
+  șansele de la, de exemplu, 55% la 58–60% pentru cele mai bune acțiuni, nu la 80%.
 - Zilele similare din istoric **se suprapun**, deci `n` supraestimează câte cazuri independente există.
 - Lista de acțiuni conține companiile mari de **azi**. Testul pe trecut e deci ușor prea optimist (survivorship bias).
 - Clasificarea insiderilor din Alpha Vantage e aproximativă (nu are codul tranzacției); SEC EDGAR e exact.

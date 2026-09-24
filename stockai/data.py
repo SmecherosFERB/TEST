@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import date
 from typing import Any, Protocol
 
 import pandas as pd
@@ -151,23 +152,40 @@ class MarketData:
                 log.warning("%s", exc)
         return self._yahoo_headlines(ticker)
 
-    def earnings(self, ticker: str) -> list[dict[str, Any]] | None:
-        key = f"earnings_{ticker}"
+    def _earnings_report(self, ticker: str) -> dict[str, Any] | None:
+        key = f"earnings2_{ticker}"
         cached = self.cache.get_json(key, max_age_hours=24 * 3)
-        if cached is not None:
-            return _restore_dates(cached, "reported")
-        quarters = None
-        for source in (self.td, self.av):
-            if source is None:
-                continue
+        if isinstance(cached, dict):
+            quarters = cached.get("quarters")
+            return {"quarters": _restore_dates(quarters, "reported") if quarters is not None else None, "next": cached.get("next")}
+        report = None
+        if self.td is not None:
             try:
-                quarters = source.earnings(ticker)
-                break
+                report = self.td.earnings_report(ticker)
             except DataError as exc:
                 log.warning("%s", exc)
-        if quarters is not None:
-            self.cache.set_json(key, quarters)
-        return quarters
+        if report is None and self.av is not None:
+            try:
+                report = {"quarters": self.av.earnings(ticker), "next": None}
+            except DataError as exc:
+                log.warning("%s", exc)
+        if report is not None:
+            nxt = report.get("next")
+            report = {"quarters": report.get("quarters"), "next": nxt.isoformat() if hasattr(nxt, "isoformat") else nxt}
+            self.cache.set_json(key, report)
+        return report
+
+    def earnings(self, ticker: str) -> list[dict[str, Any]] | None:
+        report = self._earnings_report(ticker)
+        return report["quarters"] if report else None
+
+    def next_earnings(self, ticker: str) -> date | None:
+        """Data următorului raport trimestrial (doar din Twelve Data)."""
+        report = self._earnings_report(ticker)
+        try:
+            return date.fromisoformat(report["next"]) if report and report.get("next") else None
+        except ValueError:
+            return None
 
     def insiders(self, ticker: str, close: pd.Series | None = None) -> list[dict[str, Any]] | None:
         """Cumpărări (cod P) și vânzări (cod S) pe piață ale insiderilor."""

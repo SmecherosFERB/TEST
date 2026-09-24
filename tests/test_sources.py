@@ -160,9 +160,28 @@ def test_market_data_caches_earnings_on_disk(tmp_path):
     assert second[0]["reported"] == first[0]["reported"] == date(2026, 7, 30)
 
 
+class _FakeTD:
+    def __init__(self):
+        self.calls = 0
+
+    def earnings_report(self, symbol):
+        self.calls += 1
+        return {"quarters": parse_earnings(AV_EARNINGS), "next": date(2026, 10, 29)}
+
+
+def test_market_data_next_earnings_shares_one_request(tmp_path):
+    md = MarketData(cache=DiskCache(tmp_path))
+    md.td = _FakeTD()
+    assert md.earnings("AAPL")[0]["reported"] == date(2026, 7, 30)
+    assert md.next_earnings("AAPL") == date(2026, 10, 29)
+    assert MarketData(cache=DiskCache(tmp_path)).next_earnings("AAPL") == date(2026, 10, 29)
+    assert md.td.calls == 1
+
+
 def test_market_data_without_keys_returns_none_for_optional_sources(tmp_path):
     md = MarketData(cache=DiskCache(tmp_path))
     assert md.earnings("AAPL") is None
+    assert md.next_earnings("AAPL") is None
     assert md.insiders("AAPL") is None
 
 
@@ -195,6 +214,16 @@ def test_twelve_data_statistics_earnings_insiders():
     ]})
     assert [q["reported"] for q in quarters] == [date(2026, 7, 30), date(2026, 4, 30)]
     assert quarters[0]["surprise_pct"] == 6.88
+    from stockai.sources.twelvedata import parse_next_earnings
+
+    upcoming = {"earnings": [
+        {"date": "2026-10-29", "eps_estimate": 2.1, "eps_actual": None},
+        {"date": "2027-01-28", "eps_estimate": 2.4, "eps_actual": None},
+        {"date": "2026-07-30", "eps_estimate": 1.89, "eps_actual": 2.02},
+    ]}
+    assert parse_next_earnings(upcoming, today=date(2026, 9, 24)) == date(2026, 10, 29)
+    assert parse_next_earnings(upcoming, today=date(2026, 11, 1)) == date(2027, 1, 28)
+    assert parse_next_earnings({"earnings": []}) is None
 
     trades = td_insiders({"insider_transactions": [
         {"full_name": "NEWSTEAD JENNIFER", "position": "Officer", "date_reported": "2026-09-15", "shares": 1438,

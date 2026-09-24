@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from stockai.model import FEATURES, ProbabilityModel, build_dataset, feature_frame, walk_forward
+from stockai.model import FEATURES, ProbabilityModel, build_dataset, design_effect, feature_frame, walk_forward
 
 from .conftest import make_prices
 
@@ -32,7 +32,8 @@ def test_feature_frame_columns_and_clipping():
     assert list(f.columns) == FEATURES
     last = f.iloc[-1]
     assert last.notna().all()
-    assert -0.9 <= last["high_52w"] <= 0 and 0 <= last["vol_20d"] <= 2
+    assert -0.8 <= last["high_52w"] <= 0 and np.log(0.05) <= last["vol_60d"] <= np.log(2)
+    assert f["mom_bear"].dropna().abs().le(f["mom_12_1"].dropna().abs() + 1e-12).all()
 
 
 def test_build_dataset_labels_and_step():
@@ -52,18 +53,25 @@ def test_walk_forward_finds_real_signal_and_model_roundtrip(tmp_path):
     assert report.n > 1000 and report.years
     assert report.skill > 0 and report.auc > 0.55
     assert report.top_decile_up > report.overall_up
-    assert len(report.calibration) == 10
+    assert len(report.calibration) == 10 and len(report.groups) == 5
+    assert report.groups[-1]["actual"] > report.groups[0]["actual"]
+    assert report.recalibration.helps and report.n_independent <= report.n
     text = report.render()
-    assert "walk-forward" in text and "AUC" in text
+    assert "walk-forward" in text and "AUC" in text and "a contat sigur statistic" in text
 
     model = ProbabilityModel(20).fit(data)
+    model.calibration = report.recalibration
     path = tmp_path / "m.pkl"
     model.save(path)
     loaded = ProbabilityModel.load(path)
     p = loaded.predict(data.iloc[:5])
     assert ((p > 0) & (p < 1)).all()
+    est = loaded.estimate(data.iloc[:50])
+    assert ((est["lo"] <= est["p"]) & (est["p"] <= est["hi"])).all()
+    # un model care a ajutat în test dă probabilități diferite de la o situație la alta
+    assert est["p"].std() > 0.01
     top = next(iter(loaded.coefficients()))
-    assert top in ("ret_1m", "tech", "mom_12_1", "dist_sma200", "high_52w", "rsi")
+    assert top in ("ret_1m", "tech", "mom_12_1", "dist_sma200", "high_52w")
 
 
 def test_walk_forward_on_pure_noise_does_not_beat_base_rate_by_much():
@@ -74,6 +82,52 @@ def test_walk_forward_on_pure_noise_does_not_beat_base_rate_by_much():
         close = 40 * np.exp(np.cumsum(rng.normal(0.0003, 0.015, len(idx))))
         prices[f"N{k}"] = pd.DataFrame({"Open": close, "High": close, "Low": close, "Close": close,
                                          "Volume": np.full(len(idx), 1e6)}, index=idx)
-    report = walk_forward(build_dataset(prices, None, horizon=20, step=5), horizon=20)
+    data = build_dataset(prices, None, horizon=20, step=5)
+    report = walk_forward(data, horizon=20)
     # pe zgomot, un test corect nu trebuie să „descopere” un avantaj mare
     assert report.skill < 0.02
+    assert not report.recalibration.helps
+    # iar probabilitățile recalibrate rămân lângă medie, cu intervalul incluzând media
+    model = ProbabilityModel(20).fit(data)
+    model.calibration = report.recalibration
+    est = model.estimate(data.iloc[-200:])
+    base = est["base"]
+    assert np.abs(est["p"] - base).max() < 0.03
+    assert ((est["lo"] <= base) & (base <= est["hi"])).mean() > 0.95
+
+
+def test_beat_target_labels_compare_with_market():
+    prices, market = momentum_world(n_stocks=2, n_days=900)
+    data = build_dataset(prices, market, horizon=20, target="beat")
+    close, m = prices["S0"]["Close"], market.reindex(prices["S0"].index, method="ffill")
+    row = data[data["ticker"] == "S0"].iloc[0]
+    i = close.index.get_loc(row["date"])
+    stock_ret = close.iloc[i + 20] / close.iloc[i] - 1
+    market_ret = m.iloc[i + 20] / m.iloc[i] - 1
+    assert row["label"] == float(stock_ret > market_ret)
+    # implicit, ferestrele de 20 de zile nu se suprapun
+    dates = pd.DatetimeIndex(data[data["ticker"] == "S0"]["date"])
+    assert (np.diff(close.index.get_indexer(dates)) == 20).all()
+    with pytest.raises(ValueError, match="S&P 500"):
+        build_dataset(prices, None, target="beat")
+
+
+def test_design_effect_counts_months_that_move_together():
+    rng = np.random.default_rng(1)
+    months = np.repeat(np.arange(60), 40).astype(str)
+    independent = rng.normal(0, 0.5, len(months))
+    together = independent + np.repeat(rng.normal(0, 0.5, 60), 40)
+    assert design_effect(independent, months) < 1.5
+    assert design_effect(together, months) > 10
+
+
+def test_old_model_file_is_rejected(tmp_path):
+    import pickle
+
+    prices, market = momentum_world(n_stocks=2, n_days=900)
+    model = ProbabilityModel(20).fit(build_dataset(prices, market, horizon=20))
+    model.features = ["tech", "rsi"]
+    path = tmp_path / "old.pkl"
+    path.write_bytes(pickle.dumps(model))
+    with pytest.raises(TypeError, match="versiune mai veche"):
+        ProbabilityModel.load(path)

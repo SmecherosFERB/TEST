@@ -93,4 +93,24 @@ def honest_estimate(
         "stock_p": odds.probability_up,
         "stock_independent_cases": n_stock,
         "prior": prior,
+        "source": "history",
+    }
+
+
+def model_estimate(model_out: dict, odds: HistoricalOdds | None) -> dict | None:
+    """Estimarea modelului recalibrat pe anii nevăzuți (are deja intervalul lui); istoricul acțiunii rămâne informativ."""
+    if not model_out or model_out.get("lo") is None:
+        return None
+    p, lo, hi, base = model_out["prob"], model_out["lo"], model_out["hi"], model_out["base_rate"]
+    return {
+        "p": p,
+        "lo": lo,
+        "hi": hi,
+        "base": base,
+        "edge": p - base,
+        "sure": "up" if lo > base else "down" if hi < base else None,
+        "stock_p": odds.probability_up if odds else None,
+        "stock_independent_cases": odds.samples / max(1, odds.horizon) if odds else 0.0,
+        "prior": p,
+        "source": "model",
     }

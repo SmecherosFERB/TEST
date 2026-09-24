@@ -38,6 +38,8 @@ class Settings:
 
     # Modelul de probabilitate antrenat cu `python -m stockai --train`.
     model_path: str = field(default_factory=lambda: os.getenv("STOCKAI_MODEL", ".cache/model.pkl"))
+    # Al doilea model: șansele ca acțiunea să bată S&P 500 (python -m stockai --train --target beat).
+    beat_model_path: str = field(default_factory=lambda: os.getenv("STOCKAI_MODEL_BEAT", ".cache/model_beat.pkl"))
 
     claude_model: str = field(default_factory=lambda: os.getenv("CLAUDE_MODEL", "claude-opus-5"))
     claude_effort: str = field(default_factory=lambda: os.getenv("CLAUDE_EFFORT", "high"))

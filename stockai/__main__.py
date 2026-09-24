@@ -48,11 +48,14 @@ def render(rec: Recommendation) -> str:
         + (f", încredere {CONFIDENCE[rec.claude.confidence]})" if rec.claude else ")"),
         "Scoruri: " + " · ".join(f"{label} {fmt_score(s.get(key))}" for key, label in SCORE_LABELS),
     ]
-    if rec.model:
-        m = rec.model
+    for m, what in ((rec.model, "șanse de creștere"), (rec.model_beat, "șanse să bată S&P 500")):
+        if not m:
+            continue
+        interval = f"interval 90%: {m['lo']:.0%}–{m['hi']:.0%}, " if m.get("lo") is not None else ""
+        helped = {True: "; a ajutat în test: da", False: "; a ajutat în test: nu încă"}.get(m.get("helps"), "")
         lines.append(
-            f"Model statistic: {m['prob']:.0%} șanse de creștere în {m['horizon']} zile"
-            f" (de obicei {m['base_rate']:.0%}; antrenat pe {m['trained'].get('tickers', '?')} acțiuni)"
+            f"Model statistic: {m['prob']:.0%} {what} în {m['horizon']} zile"
+            f" ({interval}de obicei {m['base_rate']:.0%}; antrenat pe {m['trained'].get('tickers', '?')} acțiuni{helped})"
         )
     if rec.honest:
         h = rec.honest
@@ -79,6 +82,10 @@ def render(rec: Recommendation) -> str:
             f"Rezultate: surpriză {surprise} la raportul din {e['last_reported']} (acum {e['days_since']} zile),"
             f" estimări depășite {e['beats_last4']} din ultimele trimestre"
         )
+    if x.get("next_earnings"):
+        n = x["next_earnings"]
+        warn = " · ATENȚIE: cade în perioada estimată, prețul poate sări mult în orice direcție" if n["days"] <= 28 else ""
+        lines.append(f"Următorul raport trimestrial: {n['date']} (în {_pl(n['days'], 'zi', 'zile')}){warn}")
     if x.get("insiders"):
         i = x["insiders"]
         lines.append(
@@ -99,7 +106,7 @@ def render(rec: Recommendation) -> str:
     return "\n".join(lines)
 
 
-def train(tickers: list[str], settings: Settings, with_earnings: bool) -> int:
+def train(tickers: list[str], settings: Settings, with_earnings: bool, target: str = "up") -> int:
     from .model import ProbabilityModel, build_dataset, walk_forward
 
     md = MarketData()
@@ -119,20 +126,24 @@ def train(tickers: list[str], settings: Settings, with_earnings: bool) -> int:
             q = md.earnings(t)
             if q:
                 earnings[t] = q
-    data = build_dataset(prices, market["Close"], earnings, horizon=settings.horizon_days)
-    report = walk_forward(data, horizon=settings.horizon_days)
+    data = build_dataset(prices, market["Close"], earnings, horizon=settings.horizon_days, target=target)
+    report = walk_forward(data, horizon=settings.horizon_days, target=target)
     print(report.render())
-    model = ProbabilityModel(settings.horizon_days).fit(data)
-    model.save(settings.model_path)
-    print(f"\nModel salvat în {settings.model_path} ({model.info['rows']} rânduri, {model.info['tickers']} acțiuni,"
+    model = ProbabilityModel(settings.horizon_days, target).fit(data)
+    # Probabilitățile afișate sunt recalibrate pe rezultatele din anii nevăzuți.
+    model.calibration = report.recalibration
+    path = settings.beat_model_path if target == "beat" else settings.model_path
+    model.save(path)
+    print(f"\nModel salvat în {path} ({model.info['rows']} rânduri, {model.info['tickers']} acțiuni,"
           f" {model.info['from']} → {model.info['to']}).")
     print("Ce contează cel mai mult (pozitiv = mai multe șanse de creștere):")
     from .model import FEATURE_NAMES
 
     for name, coef in model.coefficients().items():
         print(f"  {FEATURE_NAMES[name]}: {coef:+.3f}")
-    if report.skill <= 0:
-        print("\nAtenție: modelul NU a bătut rata de bază în test. Tratează-i probabilitățile cu prudență.")
+    if not report.recalibration.helps:
+        print("\nAtenție: în anii de test, ordinea dată de model NU a contat sigur statistic."
+              " Probabilitățile lui rămân aproape de medie până când datele arată altceva.")
     return 0
 
 
@@ -150,15 +161,15 @@ def log_predictions(rec: Recommendation) -> None:
         track.log_prediction(rec.ticker, made_on, rec.claude.probability_up_pct / 100, rec.honest["base"], "claude")
 
 
-def load_model(settings: Settings):
-    if not os.path.exists(settings.model_path):
+def load_model(path: str):
+    if not os.path.exists(path):
         return None
     from .model import ProbabilityModel
 
     try:
-        return ProbabilityModel.load(settings.model_path)
+        return ProbabilityModel.load(path)
     except Exception as exc:
-        print(f"Notă: modelul din {settings.model_path} nu a putut fi încărcat ({exc}).", file=sys.stderr)
+        print(f"Notă: modelul din {path} nu a putut fi încărcat ({exc}).", file=sys.stderr)
         return None
 
 
@@ -174,6 +185,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--train", action="store_true",
                         help="antrenează modelul de probabilitate pe lista de acțiuni (sau pe simbolurile date)")
     parser.add_argument("--limit", type=int, default=None, help="la --train: doar primele N acțiuni din listă")
+    parser.add_argument("--target", choices=["up", "beat"], default="up",
+                        help="la --train: up = prețul crește (implicit), beat = acțiunea bate S&P 500")
     parser.add_argument("--with-earnings", action="store_true",
                         help="la --train: include surprizele la rezultate (o cerere Alpha Vantage pe acțiune)")
     parser.add_argument("--evaluate", action="store_true",
@@ -186,7 +199,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.train:
         tickers = [t.upper() for t in args.tickers] or [s["ticker"] for s in load_universe() if s["sector"] != "ETF"]
-        return train(tickers[: args.limit] if args.limit else tickers, settings, args.with_earnings)
+        return train(tickers[: args.limit] if args.limit else tickers, settings, args.with_earnings, args.target)
     if args.evaluate:
         from . import track
 
@@ -205,11 +218,12 @@ def main(argv: list[str] | None = None) -> int:
             advisor = ClaudeAdvisor(model=settings.claude_model, effort=settings.claude_effort)
         else:
             print("Notă: ANTHROPIC_API_KEY lipsește, rulez doar pe reguli.", file=sys.stderr)
-    model = load_model(settings)
+    model, beat_model = load_model(settings.model_path), load_model(settings.beat_model_path)
     if model is None:
         print("Notă: modelul de probabilitate nu e antrenat încă (python -m stockai --train).", file=sys.stderr)
 
-    analyzer = Analyzer(MarketData(), settings=settings, advisor=advisor, claude_mode=claude_mode, model=model)
+    analyzer = Analyzer(MarketData(), settings=settings, advisor=advisor, claude_mode=claude_mode,
+                        model=model, beat_model=beat_model)
     results, failed = [], False
     for ticker in args.tickers:
         try:

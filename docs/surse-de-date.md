@@ -22,7 +22,9 @@ furnizorului înainte să plătești ceva.
 | SEC EDGAR: insideri (formularele 4) | da, cu `SEC_USER_AGENT` | nu (fără conector) |
 | FRED: VIX, curba randamentelor, prima de risc | da | nu (fără conector) |
 | Trendul S&P 500 (SPY) | da | da |
-| Model de probabilitate verificat walk-forward | da (`--train`) | nu încă |
+| Model de probabilitate verificat walk-forward și recalibrat pe anii nevăzuți | da (`--train`) | da (învață din acțiunile scanate) |
+| Ținta „bate S&P 500” (randament relativ) | da (`--train --target beat`) | da |
+| Data următorului raport trimestrial (avertizare) | da (Twelve Data) | da (Twelve Data) |
 
 ## Ce îmbunătățește realist predicția
 
@@ -42,7 +44,22 @@ Mai multe surse nu înseamnă automat predicții mai bune. Ce contează:
    - *cumpărări „oportuniste” ale insiderilor* (Cohen, Malloy, Pomorski, 2012): ~0,82% pe lună
      randament anormal. Studii mai noi nu reproduc complet rezultatul;
    - *short interest* ridicat, ca semnal de prudență.
-4. **Așteptări realiste.** McLean și Pontiff (2016) au studiat 97 de semnale publicate:
+4. **Semnalele pe care le folosește modelul** (aceleași în program și în pagină):
+   - *apropierea de maximul pe 52 de săptămâni* (George și Hwang, 2004): explică mare parte din
+     profitul strategiilor de momentum și nu se inversează pe termen lung;
+   - *revenirea după ultima lună* (Jegadeesh, 1990): acțiunile care au urcat mult într-o lună tind
+     să se corecteze puțin în luna următoare;
+   - *momentum care se strică după un an slab al pieței* (Daniel și Moskowitz, 2016): prăbușirile
+     momentumului vin când piața revine după scăderi, de aceea modelul are un termen separat pentru acel caz;
+   - *volum neobișnuit de mare* (Gervais, Kaniel și Mingelgrin, 2001): acțiunile cu volum mult peste
+     normal tind să urce în luna următoare;
+   - *volatilitatea și lichiditatea*: Gu, Kelly și Xiu (2020) au comparat metode de învățare automată pe
+     ~30.000 de acțiuni și au găsit că momentumul, lichiditatea și volatilitatea sunt cele mai importante
+     semnale. Chiar și cele mai bune modele explică doar ~0,3–0,4% din variația randamentelor lunare.
+5. **Randament relativ în loc de absolut.** Dacă acțiunea urcă în 4 săptămâni depinde mult de piață,
+   pe care nimeni nu o prezice bine. Semnalele de mai sus spun mai mult despre care acțiuni se descurcă
+   mai bine decât altele. De aceea modelul are și ținta „bate S&P 500”.
+6. **Așteptări realiste.** McLean și Pontiff (2016) au studiat 97 de semnale publicate:
    randamentele scad cu 26% în afara perioadei studiate și cu 58% după publicare. Orice semnal
    „descoperit” trebuie verificat pe date noi.
 

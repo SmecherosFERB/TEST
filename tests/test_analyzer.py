@@ -125,10 +125,48 @@ def test_analyze_uses_optional_sources_and_model(prices):
     assert 0 < rec.model["prob"] < 1 and rec.model["trained"]["tickers"] == 2
     ctx = advisor.contexts[0]
     assert ctx["earnings"]["beats_last4"] == "1/1"
-    assert ctx["statistical_model"]["prob_up"] == round(rec.model["prob"], 3)
+    assert ctx["statistical_model"]["prob"] == round(rec.model["prob"], 3)
+    assert ctx["statistical_model"]["interval_90"] is None  # model fără recalibrare
+    assert rec.honest["source"] == "history"
     assert ctx["market_trend_sp500"]["label"] == "în creștere"
 
 
 def test_model_disagreement_is_ambiguous():
     reasons = find_ambiguity(scores(), "BUY", odds(0.65), Settings(), {"prob": 0.45, "base_rate": 0.55})
     assert any("modelul statistic contrazice" in r for r in reasons)
+
+
+def test_calibrated_models_drive_the_estimate_and_upcoming_earnings_is_reported(prices):
+    from datetime import date, timedelta
+
+    import pandas as pd
+
+    from stockai.model import ProbabilityModel, build_dataset, walk_forward
+
+    from .conftest import RichFakeData
+    from .test_model import momentum_world
+
+    world, market = momentum_world(n_stocks=8, n_days=2600)
+    models = {}
+    for target in ("up", "beat"):
+        data = build_dataset(world, market, horizon=20, target=target)
+        m = ProbabilityModel(20, target).fit(data)
+        m.calibration = walk_forward(data, horizon=20, target=target).recalibration
+        models[target] = m
+
+    class WithCalendar(RichFakeData):
+        def next_earnings(self, ticker):
+            return date.today() + timedelta(days=12)
+
+    px = world["S0"]
+    data = WithCalendar(px, market=pd.DataFrame({"Close": market}))
+    advisor = FakeAdvisor()
+    rec = Analyzer(data, advisor=advisor, claude_mode="always", model=models["up"], beat_model=models["beat"]).analyze("S0")
+    assert rec.honest["source"] == "model"
+    assert rec.honest["p"] == rec.model["prob"] and rec.honest["lo"] == rec.model["lo"]
+    assert rec.model_beat and rec.model_beat["target"] == "beat" and rec.model_beat["lo"] <= rec.model_beat["prob"]
+    assert rec.extras["next_earnings"] == {"date": (date.today() + timedelta(days=12)).isoformat(), "days": 12}
+    ctx = advisor.contexts[0]
+    assert ctx["next_earnings"]["days"] == 12
+    assert ctx["statistical_estimate"]["source"].startswith("model")
+    assert ctx["statistical_model_beat_sp500"]["interval_90"] is not None

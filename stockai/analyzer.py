@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from .advisor import AdvisorError, ClaudeAdvisor, ClaudeVerdict
-from .calibration import HistoricalOdds, historical_odds, honest_estimate
+from .calibration import HistoricalOdds, historical_odds, honest_estimate, model_estimate
 from .config import Settings
 from .data import DataError, DataProvider
 from .indicators import compute_all
@@ -48,6 +48,7 @@ class Recommendation:
     ambiguity_reasons: list[str] = field(default_factory=list)
     extras: dict[str, Any] = field(default_factory=dict)
     model: dict[str, Any] | None = None
+    model_beat: dict[str, Any] | None = None
     honest: dict[str, Any] | None = None
     claude: ClaudeVerdict | None = None
     claude_error: str | None = None
@@ -71,6 +72,7 @@ class Recommendation:
             "scores": self.scores,
             "historical_odds": asdict(self.odds) if self.odds else None,
             "model": self.model,
+            "model_beat_sp500": self.model_beat,
             "estimate": self.honest,
             "extras": self.extras,
             "ambiguity_reasons": self.ambiguity_reasons,
@@ -125,6 +127,28 @@ def find_ambiguity(
     return reasons
 
 
+def _next_earnings(upcoming: Any) -> dict[str, Any] | None:
+    """Raportul trimestrial următor, dacă e în următoarele ~2 luni."""
+    from datetime import date
+
+    if not isinstance(upcoming, date):
+        return None
+    days = (upcoming - date.today()).days
+    return {"date": upcoming.isoformat(), "days": days} if 0 <= days <= 60 else None
+
+
+def _model_context(m: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not m:
+        return None
+    return {
+        "prob": round(m["prob"], 3),
+        "interval_90": [round(m["lo"], 3), round(m["hi"], 3)] if m.get("lo") is not None else None,
+        "base_rate": round(m["base_rate"], 3),
+        "ranking_helped_significantly_out_of_sample": m.get("helps"),
+        "trained_on": m["trained"],
+    }
+
+
 class Analyzer:
     def __init__(
         self,
@@ -133,12 +157,14 @@ class Analyzer:
         advisor: ClaudeAdvisor | None = None,
         claude_mode: ClaudeMode = "auto",
         model: Any | None = None,
+        beat_model: Any | None = None,
     ) -> None:
         self.data = data
         self.settings = settings or Settings()
         self.advisor = advisor
         self.claude_mode = claude_mode
         self.model = model
+        self.beat_model = beat_model
 
     def _optional(self, name: str, *args: Any, **kwargs: Any) -> Any:
         """Surse opționale: dacă lipsesc sau dau eroare, analiza continuă fără ele."""
@@ -167,12 +193,14 @@ class Analyzer:
         quarters = self._optional("earnings", ticker)
         trades = self._optional("insiders", ticker, close=prices["Close"])
         macro_raw = self._optional("macro")
+        upcoming = self._optional("next_earnings", ticker)
 
         extras = {
             "market": market_signal(market_close),
             "macro": macro_signal(macro_raw),
             "earnings": earnings_signal(quarters, today),
             "insiders": insider_signal(trades, today),
+            "next_earnings": _next_earnings(upcoming),
         }
         market_parts = [x["score"] for x in (extras["market"], extras["macro"]) if x]
         scores: dict[str, float | None] = {
@@ -186,8 +214,10 @@ class Analyzer:
         scores["composite"] = composite_score(scores, s.weights)
         rule_decision = decision_from_score(scores["composite"], s.buy_threshold)
         odds = historical_odds(ind["close"], tech, scores["technical"], s.horizon_days, s.bucket_width)
-        model_out = self._model_probability(prices, market_close, quarters)
-        honest = honest_estimate(
+        model_out = self._model_probability(self.model, prices, market_close, quarters)
+        beat_out = self._model_probability(self.beat_model, prices, market_close, quarters)
+        # Modelul recalibrat pe anii nevăzuți are deja intervalul lui; altfel, istoricul acțiunii tras spre model.
+        honest = model_estimate(model_out, odds) or honest_estimate(
             odds,
             model_out["prob"] if model_out else None,
             model_out["base_rate"] if model_out else None,
@@ -203,6 +233,7 @@ class Analyzer:
             odds=odds,
             extras={k: v for k, v in {**extras, "macro_raw": macro_raw}.items() if v},
             model=model_out,
+            model_beat=beat_out,
             honest=honest,
             ambiguity_reasons=find_ambiguity(scores, rule_decision, odds, s, model_out, honest),
         )
@@ -217,9 +248,9 @@ class Analyzer:
         return rec
 
     def _model_probability(
-        self, prices: pd.DataFrame, market_close: pd.Series | None, quarters: list[dict[str, Any]] | None
+        self, model: Any | None, prices: pd.DataFrame, market_close: pd.Series | None, quarters: list[dict[str, Any]] | None
     ) -> dict[str, Any] | None:
-        if self.model is None:
+        if model is None:
             return None
         from .model import FEATURES, feature_frame
 
@@ -227,11 +258,23 @@ class Analyzer:
             last = feature_frame(prices, market_close, quarters).iloc[[-1]]
             if last[FEATURES].isna().any(axis=1).iloc[0]:
                 return None
-            prob = float(self.model.predict(last)[0])
+            est = model.estimate(last)
         except Exception as exc:
             log.warning("Modelul nu a putut calcula probabilitatea: %s", exc)
             return None
-        return {"prob": prob, "base_rate": self.model.base_rate, "horizon": self.model.horizon, "trained": self.model.info}
+        lo, hi = float(est["lo"][0]), float(est["hi"][0])
+        cal = getattr(model, "calibration", None)
+        return {
+            "prob": float(est["p"][0]),
+            "lo": None if np.isnan(lo) else lo,
+            "hi": None if np.isnan(hi) else hi,
+            "base_rate": float(est["base"]),
+            "raw_prob": float(est["raw"][0]),
+            "helps": cal.helps if cal else None,
+            "target": getattr(model, "target", "up"),
+            "horizon": model.horizon,
+            "trained": model.info,
+        }
 
     def _claude_context(
         self,
@@ -275,24 +318,23 @@ class Analyzer:
             ),
             "statistical_estimate": (
                 {
+                    "source": (
+                        "model învățat pe toată lista, verificat doar pe ani nevăzuți și recalibrat"
+                        if rec.honest.get("source") == "model"
+                        else "istoricul acțiunii, tras spre modelul sau rata de bază a listei"
+                    ),
                     "prob_up": round(rec.honest["p"], 3),
                     "interval_90": [round(rec.honest["lo"], 3), round(rec.honest["hi"], 3)],
                     "base_rate": round(rec.honest["base"], 3),
-                    "this_stock_only": round(rec.honest["stock_p"], 3),
+                    "this_stock_only": None if rec.honest["stock_p"] is None else round(rec.honest["stock_p"], 3),
                     "this_stock_independent_cases": round(rec.honest["stock_independent_cases"]),
                 }
                 if rec.honest
                 else None
             ),
-            "statistical_model": (
-                {
-                    "prob_up": round(rec.model["prob"], 3),
-                    "base_rate": round(rec.model["base_rate"], 3),
-                    "trained_on": rec.model["trained"],
-                }
-                if rec.model
-                else None
-            ),
+            "statistical_model": _model_context(rec.model),
+            "statistical_model_beat_sp500": _model_context(rec.model_beat),
+            "next_earnings": rec.extras.get("next_earnings"),
             "market_trend_sp500": rec.extras.get("market"),
             "macro": rec.extras.get("macro"),
             "earnings": rec.extras.get("earnings"),
