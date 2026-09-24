@@ -337,6 +337,8 @@ class BacktestReport:
                 + ("ordinea dată de model a contat sigur statistic." if r.helps
                    else "ordinea dată de model NU a contat sigur statistic; probabilitățile rămân aproape de medie.")
             )
+        good = sum(1 for y in self.years if y["auc"] > 0.5)
+        lines.append(f"  Consecvență: ordinea dată de model a fost mai bună decât întâmplarea în {good} din {len(self.years)} ani.")
         lines.append("  Calibrare brută (probabilitate prezisă → cât de des s-a întâmplat):")
         for c in self.calibration:
             lines.append(f"    {c['predicted']:.1%} → {c['actual']:.1%}  (n={c['n']})")

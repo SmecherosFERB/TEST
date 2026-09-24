@@ -1655,14 +1655,16 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       if (train.length < 400 || test.length < 20) continue;
       const m = trainModel(train);
       let bs = 0, bb = 0, up = 0;
+      const yearPreds = [];
       for (const r of test) {
         const p = m.predict(r.f);
         oos.push({ p, y: r.y, b: m.base, d: r.d });
+        yearPreds.push({ p, y: r.y });
         bs += (p - r.y) ** 2;
         bb += (m.base - r.y) ** 2;
         up += r.y;
       }
-      perYear.push({ year: Y, n: test.length, skill: bb > 0 ? 1 - bs / bb : 0, up: up / test.length });
+      perYear.push({ year: Y, n: test.length, skill: bb > 0 ? 1 - bs / bb : 0, up: up / test.length, auc: aucOf(yearPreds) });
     }
     return { oos, perYear };
   }
@@ -1811,6 +1813,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
   function scheduleModel() {
     clearTimeout(modelTimer);
     modelTimer = setTimeout(() => {
+      if (scanJob) { scheduleModel(); return; } // reantrenăm după scanare, nu la fiecare acțiune
       const docs = [...trainDocs.values()].filter((d) => d && d.tv === TV && !etf(d.ticker) && !duplicateClass(d.ticker));
       const sig = docs.map((d) => `${d.ticker}:${d.last}`).sort().join(",");
       if (sig === modelSig) return;
@@ -1926,7 +1929,9 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     if (spyData && spyData.day === today() && marketDoc && marketDoc.day === today()) return marketDoc;
     try {
       const spy = await getBars(mcp, "SPY");
-      if (spy.freq === "D" && spy.bars.length > LOOK + 30) spyData = { day: today(), ...spySeries(spy.bars) };
+      // Reperul trebuie să treacă aceleași verificări: o serie S&P 500 greșită ar strica toate etichetele „bate S&P 500”.
+      const spyQ = checkBars(spy.bars, FREQ[spy.freq]);
+      if (spy.freq === "D" && spy.bars.length > LOOK + 30 && spyQ.grade !== "slabă" && !spyQ.stale) spyData = { day: today(), ...spySeries(spy.bars) };
       const m = marketFromBars(spy.bars, FREQ[spy.freq]);
       if (m && (!marketDoc || marketDoc.day !== today())) {
         marketDoc = { ...m, day: today() };
@@ -2307,6 +2312,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     }
     const done = scanJob.done;
     scanJob = null;
+    scheduleModel();
     renderScanBar();
     renderScanStatus(stopMsg ? null : `Gata: ${done} ${done === 1 ? "acțiune scanată" : "acțiuni scanate"}.`);
     if (stopMsg) showAlert(stopMsg[0], stopMsg[1]);
@@ -3090,6 +3096,10 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       el("div", { class: "table-scroll" }, el("table", null,
         el("thead", null, el("tr", null, el("th", { text: "Ce estimăm" }), el("th", { class: "r", text: "Cele mai slabe 20%" }), el("th", { class: "r", text: "Cele mai bune 20%" }), el("th", { class: "r", text: "Media" }), el("th", { text: "Sigur statistic" }))),
         el("tbody", null, tr("up"), tr("beat")))),
+      el("p", { class: "note", text: ["up", "beat"].filter((k) => models[k] && models[k].ready).map((k) => {
+        const ys = models[k].years, good = ys.filter((y) => y.auc > 0.5).length;
+        return `${TARGETS[k].label}: ordinea dată de model a fost mai bună decât întâmplarea în ${good} din ${ys.length} ani.`;
+      }).join(" ") + " Un model de încredere ar trebui să ajute în majoritatea anilor, nu doar într-unul bun." }),
       el("p", { class: "note", text: "Procentele de sus sunt recalibrate pe aceste rezultate: dacă ordinea dată de model nu a contat sigur, ele rămân aproape de medie." })));
     const mt = models[curTarget()];
     const top = mt.coefs.filter((c) => Math.abs(c.w) >= 0.01).slice(0, 5);
