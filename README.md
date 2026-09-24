@@ -40,6 +40,23 @@ Componentele fără date sunt omise, iar ponderile se recalculează. Scor compus
    din anii anteriori și e testat pe anul respectiv. Raportul arată dacă bate rata de bază (eroare Brier, AUC, calibrare).
    Dacă nu o bate, programul te avertizează.
 
+### Cât de reale sunt procentele
+
+Trei lucruri fac diferența între un procent care arată bine și unul pe care te poți baza:
+
+1. **Cazuri independente, nu zile.** Ferestrele de 20 de zile se suprapun: 20 de zile la rând valorează cam o
+   singură observație. „68% din 91 de cazuri” înseamnă de fapt ~23 de cazuri independente, adică un interval de
+   încredere de 90% de ~51–82%. De aceea afișăm mereu **intervalul**, iar dacă el include rata obișnuită,
+   spunem clar că **nu avem un avantaj dovedit**.
+2. **Media tuturor acțiunilor.** Procentul unei singure acțiuni e tras spre ce s-a întâmplat la toate acțiunile
+   cu un scor similar (în pagină: acțiunile scanate; în program: modelul antrenat pe toată lista). Asta reduce
+   și efectul de „privire înapoi”: acțiunile care au urcat mult în trecut par să urce „de obicei” mai des decât
+   o vor face probabil în viitor.
+3. **Verificare pe viitor.** Fiecare predicție (a statisticii și a lui Claude) e salvată și verificată cu
+   prețul real după ~4 săptămâni. Pagina arată panoul „Cât de bune au fost predicțiile”; în program rulezi
+   `python -m stockai --evaluate`. Comparăm cu „ca de obicei” (eroarea Brier) și verificăm calibrarea: când
+   am spus 60%, a urcat chiar în ~60% din cazuri? De la ~100 de predicții verificate, rezultatele devin de încredere.
+
 ### Când intervine Claude
 
 Claude e consultat doar când regulile „nu știu ce să facă”:
@@ -84,6 +101,7 @@ python -m stockai AAPL MSFT NVDA          # analiză; Claude doar la semnalele n
 python -m stockai AAPL --always-claude    # Claude la fiecare acțiune
 python -m stockai AAPL --no-claude        # fără costuri Claude
 python -m stockai AAPL --json             # rezultat structurat
+python -m stockai --evaluate              # verifică predicțiile ajunse la termen (după ~4 săptămâni)
 ```
 
 La prima antrenare, cu Twelve Data gratuit (8 cereri pe minut), descărcarea celor ~113 acțiuni durează cam 15 minute.

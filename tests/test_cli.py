@@ -22,6 +22,8 @@ def test_render_shows_claude_opinion_and_history():
                          "sellers": 2, "sell_value": 5300000},
         },
         model={"prob": 0.571, "base_rate": 0.55, "horizon": 20, "trained": {"tickers": 113}},
+        honest={"p": 0.574, "lo": 0.49, "hi": 0.66, "base": 0.556, "edge": 0.018, "sure": None,
+                "stock_p": 0.58, "stock_independent_cases": 12.0, "prior": 0.571},
         claude=ClaudeVerdict(
             decision="SELL", probability_up_pct=41, confidence="medium", reasoning="Știri slabe.", key_risks=["volatilitate"]
         ),
@@ -33,6 +35,8 @@ def test_render_shows_claude_opinion_and_history():
     assert "Piața (S&P 500): în creștere, +2.1% în ultima lună" in out
     assert "surpriză +7.4%" in out and "4/4" in out
     assert "12 vânzări de la 2 persoane ($5,300,000)" in out
-    assert "a urcat în 58%" in out and "n=240" in out
+    assert "Șanse estimate: 57% (interval 90%: 49%–66%, de obicei 56%)" in out
+    assert "niciun avantaj dovedit" in out
+    assert "doar această acțiune: 58% din ~12 cazuri independente" in out
     assert "Claude: 41% șanse de creștere" in out
     assert "Riscuri: volatilitate" in out

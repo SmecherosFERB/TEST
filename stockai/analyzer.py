@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from .advisor import AdvisorError, ClaudeAdvisor, ClaudeVerdict
-from .calibration import HistoricalOdds, historical_odds
+from .calibration import HistoricalOdds, historical_odds, honest_estimate
 from .config import Settings
 from .data import DataError, DataProvider
 from .indicators import compute_all
@@ -48,6 +48,7 @@ class Recommendation:
     ambiguity_reasons: list[str] = field(default_factory=list)
     extras: dict[str, Any] = field(default_factory=dict)
     model: dict[str, Any] | None = None
+    honest: dict[str, Any] | None = None
     claude: ClaudeVerdict | None = None
     claude_error: str | None = None
 
@@ -70,6 +71,7 @@ class Recommendation:
             "scores": self.scores,
             "historical_odds": asdict(self.odds) if self.odds else None,
             "model": self.model,
+            "estimate": self.honest,
             "extras": self.extras,
             "ambiguity_reasons": self.ambiguity_reasons,
             "claude": self.claude.model_dump() if self.claude else None,
@@ -83,6 +85,7 @@ def find_ambiguity(
     odds: HistoricalOdds | None,
     settings: Settings,
     model: dict[str, Any] | None = None,
+    honest: dict[str, Any] | None = None,
 ) -> list[str]:
     """Motivele pentru care regulile nu sunt suficient de sigure. Listă goală = semnal clar."""
     reasons = []
@@ -102,15 +105,16 @@ def find_ambiguity(
 
     if odds is None or odds.samples < settings.min_samples:
         reasons.append("prea puține situații similare în istoric")
-    elif abs(odds.edge) < settings.min_edge:
-        reasons.append(
-            f"istoric fără avantaj: {odds.probability_up:.0%} față de rata de bază {odds.base_rate:.0%}"
-        )
-    elif (rule_decision == "BUY" and odds.edge < 0) or (rule_decision == "SELL" and odds.edge > 0):
-        reasons.append(
-            f"regulile spun {rule_decision}, dar istoric prețul a urcat în {odds.probability_up:.0%} "
-            f"din cazuri (rata de bază {odds.base_rate:.0%})"
-        )
+    else:
+        # Estimarea onestă (trasă spre model sau spre rata de bază), dacă există; altfel procentul brut.
+        p, base = (honest["p"], honest["base"]) if honest else (odds.probability_up, odds.base_rate)
+        edge = p - base
+        if abs(edge) < settings.min_edge:
+            reasons.append(f"istoric fără avantaj: {p:.0%} șanse estimate față de {base:.0%} de obicei")
+        elif (rule_decision == "BUY" and edge < 0) or (rule_decision == "SELL" and edge > 0):
+            reasons.append(
+                f"regulile spun {rule_decision}, dar istoric prețul a urcat în {p:.0%} din cazuri (de obicei {base:.0%})"
+            )
 
     if model:
         edge = model["prob"] - model["base_rate"]
@@ -183,6 +187,12 @@ class Analyzer:
         rule_decision = decision_from_score(scores["composite"], s.buy_threshold)
         odds = historical_odds(ind["close"], tech, scores["technical"], s.horizon_days, s.bucket_width)
         model_out = self._model_probability(prices, market_close, quarters)
+        honest = honest_estimate(
+            odds,
+            model_out["prob"] if model_out else None,
+            model_out["base_rate"] if model_out else None,
+            total_samples=odds.total if odds else None,
+        )
 
         rec = Recommendation(
             ticker=ticker.upper(),
@@ -193,7 +203,8 @@ class Analyzer:
             odds=odds,
             extras={k: v for k, v in {**extras, "macro_raw": macro_raw}.items() if v},
             model=model_out,
-            ambiguity_reasons=find_ambiguity(scores, rule_decision, odds, s, model_out),
+            honest=honest,
+            ambiguity_reasons=find_ambiguity(scores, rule_decision, odds, s, model_out, honest),
         )
 
         ask = self.claude_mode == "always" or (self.claude_mode == "auto" and rec.ambiguity_reasons)
@@ -260,6 +271,17 @@ class Analyzer:
                     "overlapping_samples": rec.odds.samples,
                 }
                 if rec.odds
+                else None
+            ),
+            "statistical_estimate": (
+                {
+                    "prob_up": round(rec.honest["p"], 3),
+                    "interval_90": [round(rec.honest["lo"], 3), round(rec.honest["hi"], 3)],
+                    "base_rate": round(rec.honest["base"], 3),
+                    "this_stock_only": round(rec.honest["stock_p"], 3),
+                    "this_stock_independent_cases": round(rec.honest["stock_independent_cases"]),
+                }
+                if rec.honest
                 else None
             ),
             "statistical_model": (

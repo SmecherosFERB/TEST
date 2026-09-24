@@ -54,11 +54,18 @@ def render(rec: Recommendation) -> str:
             f"Model statistic: {m['prob']:.0%} șanse de creștere în {m['horizon']} zile"
             f" (de obicei {m['base_rate']:.0%}; antrenat pe {m['trained'].get('tickers', '?')} acțiuni)"
         )
+    if rec.honest:
+        h = rec.honest
+        verdict = ("peste medie, sigur statistic" if h["sure"] == "up" else "sub medie, sigur statistic"
+                   if h["sure"] == "down" else "intervalul include rata obișnuită: niciun avantaj dovedit")
+        lines.append(
+            f"Șanse estimate: {h['p']:.0%} (interval 90%: {h['lo']:.0%}–{h['hi']:.0%}, de obicei {h['base']:.0%}) · {verdict}"
+        )
     if rec.odds:
         o = rec.odds
         lines.append(
-            f"Istoric (doar tehnic, {o.horizon} zile): a urcat în {o.probability_up:.0%} din cazurile similare"
-            f" (rata de bază {o.base_rate:.0%}, n={o.samples}, randament mediu {o.avg_return:+.1%})"
+            f"  doar această acțiune: {o.probability_up:.0%} din ~{o.samples / o.horizon:.0f} cazuri independente,"
+            f" randament mediu {o.avg_return:+.1%}"
         )
     x = rec.extras
     if x.get("market"):
@@ -129,6 +136,20 @@ def train(tickers: list[str], settings: Settings, with_earnings: bool) -> int:
     return 0
 
 
+def log_predictions(rec: Recommendation) -> None:
+    """Salvează predicția ca s-o putem verifica peste ~4 săptămâni (python -m stockai --evaluate)."""
+    from datetime import date
+
+    from . import track
+
+    if not rec.honest:
+        return
+    made_on = date.fromisoformat(rec.as_of)
+    track.log_prediction(rec.ticker, made_on, rec.honest["p"], rec.honest["base"], "stat")
+    if rec.claude:
+        track.log_prediction(rec.ticker, made_on, rec.claude.probability_up_pct / 100, rec.honest["base"], "claude")
+
+
 def load_model(settings: Settings):
     if not os.path.exists(settings.model_path):
         return None
@@ -155,6 +176,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--limit", type=int, default=None, help="la --train: doar primele N acțiuni din listă")
     parser.add_argument("--with-earnings", action="store_true",
                         help="la --train: include surprizele la rezultate (o cerere Alpha Vantage pe acțiune)")
+    parser.add_argument("--evaluate", action="store_true",
+                        help="verifică predicțiile salvate care au ajuns la termen și arată cât de bune au fost")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
 
@@ -164,8 +187,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.train:
         tickers = [t.upper() for t in args.tickers] or [s["ticker"] for s in load_universe() if s["sector"] != "ETF"]
         return train(tickers[: args.limit] if args.limit else tickers, settings, args.with_earnings)
+    if args.evaluate:
+        from . import track
+
+        md = MarketData()
+        done = track.resolve(lambda t: md.prices(t, "1y"))
+        print(f"Predicții verificate acum: {done}")
+        print(track.report())
+        return 0
     if not args.tickers:
-        parser.error("dă cel puțin un simbol, sau folosește --train")
+        parser.error("dă cel puțin un simbol, sau folosește --train / --evaluate")
 
     claude_mode = "never" if args.no_claude else "always" if args.always_claude else "auto"
     advisor = None
@@ -188,6 +219,7 @@ def main(argv: list[str] | None = None) -> int:
             failed = True
             continue
         results.append(rec)
+        log_predictions(rec)
         if not args.json:
             print(render(rec) + "\n")
 
