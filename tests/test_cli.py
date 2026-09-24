@@ -51,7 +51,9 @@ def test_render_shows_calibrated_models_and_earnings_warning():
                 "market": 50.0, "composite": 38.0},
         rule_decision="BUY",
         odds=HistoricalOdds(0.61, 0.57, 0.015, 300, 20),
-        extras={"next_earnings": {"date": "2026-10-06", "days": 12}},
+        extras={"next_earnings": {"date": "2026-10-06", "days": 12},
+                "quality": {"score": 60, "grade": "acceptabilă", "avg_daily_dollar_volume": 3_400_000, "tradable": False,
+                            "failed_checks": ["Lichiditate: 3 mil. $ tranzacționați pe zi"], "checks": []}},
         model={"prob": 0.593, "lo": 0.55, "hi": 0.63, "base_rate": 0.56, "helps": True, "horizon": 20,
                "trained": {"tickers": 110}},
         model_beat={"prob": 0.541, "lo": 0.51, "hi": 0.57, "base_rate": 0.51, "helps": False, "horizon": 20,
@@ -64,3 +66,5 @@ def test_render_shows_calibrated_models_and_earnings_warning():
     assert "a ajutat în test: da" in out
     assert "Model statistic: 54% șanse să bată S&P 500 în 20 zile" in out and "a ajutat în test: nu încă" in out
     assert "Următorul raport trimestrial: 2026-10-06 (în 12 zile) · ATENȚIE" in out
+    assert "Calitatea datelor: acceptabilă (60/100) · 3 mil. $ tranzacționați pe zi · nu trece filtrele" in out
+    assert "  problemă: Lichiditate: 3 mil. $ tranzacționați pe zi" in out

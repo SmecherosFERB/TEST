@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import date
 from dataclasses import asdict, dataclass, field
 from itertools import combinations
 from typing import Any, Literal
@@ -15,6 +16,7 @@ from .calibration import HistoricalOdds, historical_odds, honest_estimate, model
 from .config import Settings
 from .data import DataError, DataProvider
 from .indicators import compute_all
+from .quality import check_prices
 from .scoring import (
     composite_score,
     decision_from_score,
@@ -129,8 +131,6 @@ def find_ambiguity(
 
 def _next_earnings(upcoming: Any) -> dict[str, Any] | None:
     """Raportul trimestrial următor, dacă e în următoarele ~2 luni."""
-    from datetime import date
-
     if not isinstance(upcoming, date):
         return None
     days = (upcoming - date.today()).days
@@ -195,7 +195,10 @@ class Analyzer:
         macro_raw = self._optional("macro")
         upcoming = self._optional("next_earnings", ticker)
 
+        quality = check_prices(prices, today=date.today(),
+                               fifty_two_week_high=(fundamentals or {}).get("fiftyTwoWeekHigh"))
         extras = {
+            "quality": quality.to_dict(),
             "market": market_signal(market_close),
             "macro": macro_signal(macro_raw),
             "earnings": earnings_signal(quarters, today),
@@ -237,6 +240,10 @@ class Analyzer:
             honest=honest,
             ambiguity_reasons=find_ambiguity(scores, rule_decision, odds, s, model_out, honest),
         )
+        if quality.grade == "slabă":
+            rec.ambiguity_reasons.append(
+                "datele de preț au probleme (" + ", ".join(c.label.lower() for c in quality.failed) + ")"
+            )
 
         ask = self.claude_mode == "always" or (self.claude_mode == "auto" and rec.ambiguity_reasons)
         if ask and self.advisor:
@@ -335,6 +342,7 @@ class Analyzer:
             "statistical_model": _model_context(rec.model),
             "statistical_model_beat_sp500": _model_context(rec.model_beat),
             "next_earnings": rec.extras.get("next_earnings"),
+            "data_quality": {k: v for k, v in (rec.extras.get("quality") or {}).items() if k != "checks"} or None,
             "market_trend_sp500": rec.extras.get("market"),
             "macro": rec.extras.get("macro"),
             "earnings": rec.extras.get("earnings"),

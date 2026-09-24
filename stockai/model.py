@@ -25,6 +25,7 @@ from sklearn.preprocessing import StandardScaler
 
 from .calibration import Z90, wilson_interval
 from .indicators import compute_all
+from .quality import check_prices, excluded_rows
 from .scoring import technical_score
 from .signals import earnings_surprise_series, high_52w_gap, momentum_12_1, realized_vol, regime_series
 
@@ -39,6 +40,7 @@ FEATURES = [
     "mkt_regime",
     "mkt_ret_1m",
     "mom_bear",
+    "beta_1y",
     "earn_surprise",
 ]
 FEATURE_NAMES = {
@@ -52,9 +54,12 @@ FEATURE_NAMES = {
     "mkt_regime": "trendul pieței (S&P 500)",
     "mkt_ret_1m": "randamentul pieței în ultima lună",
     "mom_bear": "momentum după un an slab al pieței",
+    "beta_1y": "beta față de S&P 500 (1 an)",
     "earn_surprise": "surpriza la ultimele rezultate",
 }
 TARGETS = {"up": "creștere", "beat": "bate S&P 500"}
+# Două clase de acțiuni ale aceleiași companii au aproape aceleași prețuri: în model contează o singură dată.
+SAME_COMPANY = {"GOOG": "GOOGL", "BRK.A": "BRK.B", "FOX": "FOXA", "NWS": "NWSA", "UA": "UAA", "LEN.B": "LEN", "HEI.A": "HEI"}
 # Penalizare L2 pe observație (λ = RIDGE · n): efectele reale sunt mici, zgomotul e mare.
 RIDGE = 0.1
 
@@ -84,10 +89,14 @@ def feature_frame(
         # Momentumul se strică după un an slab al pieței (Daniel și Moskowitz, 2016).
         bear = (m / m.shift(252) - 1) < 0
         f["mom_bear"] = f["mom_12_1"].where(bear, 0.0).where(m.shift(252).notna())
+        # Beta pe ultimul an (Frazzini și Pedersen, 2014: acțiunile cu beta mare au randamente ajustate la risc mai mici).
+        rs, rm = np.log(close).diff(), np.log(m).diff()
+        f["beta_1y"] = (rs.rolling(252, min_periods=200).cov(rm) / rm.rolling(252, min_periods=200).var()).clip(-0.5, 3.0)
     else:
         f["mkt_regime"] = 0.0
         f["mkt_ret_1m"] = 0.0
         f["mom_bear"] = 0.0
+        f["beta_1y"] = 1.0
     f["earn_surprise"] = earnings_surprise_series(quarters, close.index)
     return f[FEATURES]
 
@@ -103,22 +112,35 @@ def build_dataset(
     """Un rând la fiecare `step` zile pentru fiecare acțiune: semnalele din ziua respectivă + ce a urmat.
 
     Implicit `step = horizon`, deci ferestrele nu se suprapun și fiecare rând e un caz nou.
+    Semnalul e calculat la închiderea zilei; intrarea realistă e la închiderea următoare, ieșirea după
+    `horizon` zile. Seriile cu date slabe nu intră deloc, iar rândurile din jurul unui split neajustat sunt scoase.
     """
     if target not in TARGETS:
         raise ValueError(f"țintă necunoscută: {target}")
     if target == "beat" and market_close is None:
         raise ValueError("Pentru ținta „bate S&P 500” e nevoie de prețurile S&P 500")
-    frames = []
+    frames, excluded, dropped = [], {}, 0
     for ticker, px in prices.items():
+        if SAME_COMPANY.get(ticker) in prices:
+            excluded[ticker] = f"aceeași companie cu {SAME_COMPANY[ticker]}"
+            continue
+        quality = check_prices(px, today=px.index[-1].date())
+        if quality.grade == "slabă":
+            excluded[ticker] = "date slabe: " + ", ".join(c.label.lower() for c in quality.failed)
+            continue
         f = feature_frame(px, market_close, (earnings or {}).get(ticker))
         close = px["Close"]
-        fwd = close.shift(-horizon) / close - 1
+        fwd = close.shift(-(horizon + 1)) / close.shift(-1) - 1
         if target == "beat":
             m = market_close.reindex(close.index, method="ffill")
-            mfwd = m.shift(-horizon) / m - 1
+            mfwd = m.shift(-(horizon + 1)) / m.shift(-1) - 1
             f["label"] = (fwd > mfwd).astype(float).where(fwd.notna() & mfwd.notna())
         else:
             f["label"] = (fwd > 0).astype(float).where(fwd.notna())
+        if quality.suspect:
+            bad = excluded_rows(close.index, quality.suspect, horizon=horizon)
+            dropped += int(bad.sum())
+            f.loc[bad, "label"] = np.nan
         f = f.dropna().iloc[::-1].iloc[::step].iloc[::-1]  # pornim de la cel mai recent rând cu rezultat
         if f.empty:
             continue
@@ -129,6 +151,8 @@ def build_dataset(
         raise ValueError("Nu există destule date pentru antrenare")
     data = pd.concat(frames, ignore_index=True)
     data.attrs["step"] = step
+    data.attrs["excluded"] = excluded
+    data.attrs["days_dropped_near_splits"] = dropped
     return data
 
 
@@ -333,7 +357,7 @@ def walk_forward(data: pd.DataFrame, horizon: int = 20, min_train_years: int = 3
     preds, labels, bases, months = [], [], [], []
     for year in years[min_train_years:]:
         # Eliminăm ultimele zile dinaintea anului testat: etichetele lor depind de prețuri din anul testat.
-        cutoff = pd.Timestamp(f"{year}-01-01") - pd.Timedelta(days=int(horizon * 1.5) + 1)
+        cutoff = pd.Timestamp(f"{year}-01-01") - pd.Timedelta(days=int(horizon * 1.6) + 3)
         train = data[data["date"] < cutoff]
         test = data[pd.DatetimeIndex(data["date"]).year == year]
         if len(train) < 400 or len(test) < 20 or train["label"].nunique() < 2:

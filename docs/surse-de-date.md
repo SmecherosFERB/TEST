@@ -24,6 +24,7 @@ furnizorului înainte să plătești ceva.
 | Trendul S&P 500 (SPY) | da | da |
 | Model de probabilitate verificat walk-forward și recalibrat pe anii nevăzuți | da (`--train`) | da (învață din acțiunile scanate) |
 | Ținta „bate S&P 500” (randament relativ) | da (`--train --target beat`) | da |
+| Verificarea calității datelor și reguli de selecție (lichiditate, sector, bare închise) | da (`quality.py`) | da |
 | Data următorului raport trimestrial (avertizare) | da (Twelve Data, altfel calendarul Alpha Vantage) | da (Twelve Data, altfel calendarul Alpha Vantage) |
 
 ## Ce îmbunătățește realist predicția
@@ -56,6 +57,8 @@ Mai multe surse nu înseamnă automat predicții mai bune. Ce contează:
    - *volatilitatea și lichiditatea*: Gu, Kelly și Xiu (2020) au comparat metode de învățare automată pe
      ~30.000 de acțiuni și au găsit că momentumul, lichiditatea și volatilitatea sunt cele mai importante
      semnale. Chiar și cele mai bune modele explică doar ~0,3–0,4% din variația randamentelor lunare.
+   - *beta față de S&P 500* (Frazzini și Pedersen, 2014, „Betting Against Beta”): acțiunile cu beta mare au
+     randamente ajustate la risc mai mici; pentru „bate S&P 500”, beta spune și cât amplifică acțiunea mișcarea pieței.
 5. **Randament relativ în loc de absolut.** Dacă acțiunea urcă în 4 săptămâni depinde mult de piață,
    pe care nimeni nu o prezice bine. Semnalele de mai sus spun mai mult despre care acțiuni se descurcă
    mai bine decât altele. De aceea modelul are și ținta „bate S&P 500”.

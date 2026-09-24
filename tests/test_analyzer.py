@@ -170,3 +170,5 @@ def test_calibrated_models_drive_the_estimate_and_upcoming_earnings_is_reported(
     assert ctx["next_earnings"]["days"] == 12
     assert ctx["statistical_estimate"]["source"].startswith("model")
     assert ctx["statistical_model_beat_sp500"]["interval_90"] is not None
+    assert rec.extras["quality"]["score"] >= 50 and ctx["data_quality"]["grade"] == rec.extras["quality"]["grade"]
+    assert "checks" not in ctx["data_quality"]

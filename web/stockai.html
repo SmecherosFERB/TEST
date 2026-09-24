@@ -241,6 +241,7 @@ button, input, select { font: inherit; }
 .card-p { font-family: var(--mono); font-size: 28px; font-weight: 500; line-height: 1.1; margin-top: 6px; }
 .card-sub { font-size: 12px; color: var(--muted); }
 .card svg { width: 100%; height: 34px; display: block; margin-top: 4px; }
+.card-flag { justify-self: start; padding: 1px 8px; border-radius: 999px; font-size: 12px; background: var(--hold-soft); color: var(--hold); }
 .sig {
   display: inline-flex;
   align-items: center;
@@ -468,6 +469,18 @@ td .hint { color: var(--muted); }
 .range-scale { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 11px; color: var(--muted); }
 .why { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 14px; color: var(--ink-2); }
 .why .g { display: inline-block; width: 1.2em; }
+.quality { display: grid; gap: 10px; }
+.q-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; font-size: 14px; color: var(--ink-2); }
+.q-grade { padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--q-soft); color: var(--q); }
+.q-grade[data-g="bună"] { --q: var(--buy); --q-soft: var(--buy-soft); }
+.q-grade[data-g="acceptabilă"] { --q: var(--hold); --q-soft: var(--hold-soft); }
+.q-grade[data-g="slabă"] { --q: var(--sell); --q-soft: var(--sell-soft); }
+.checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 14px; }
+.checks li { display: grid; grid-template-columns: 1.3em minmax(0, 1fr); gap: 2px 6px; }
+.checks .g { font-weight: 600; }
+.checks .g[data-ok="1"] { color: var(--buy); }
+.checks .g[data-ok="0"] { color: var(--sell); }
+.checks small { grid-column: 2; color: var(--muted); font-size: 13px; }
 .warn { grid-column: 1 / -1; padding: 8px 12px; border-radius: 8px; background: var(--hold-soft); color: var(--ink); font-size: 14px; }
 .warn strong { color: var(--hold); }
 .sure.down { color: var(--sell); }
@@ -570,6 +583,10 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
             <h2 class="panel-title">Modelul învățat din toate acțiunile</h2>
             <div class="model" id="model"></div>
           </section>
+          <section class="panel">
+            <h2 class="panel-title">Calitatea datelor</h2>
+            <div class="quality" id="quality"></div>
+          </section>
           <section class="panel" id="claudePanel">
             <h2 class="panel-title">Opinia lui Claude</h2>
             <div class="claude" id="claude"></div>
@@ -614,7 +631,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
 
   <footer>
     <p>Unealtă de analiză, nu sfat financiar. Procentele descriu trecutul acțiunii și nu garantează nimic.</p>
-    <p>Metodă: prețuri zilnice din Twelve Data (dacă nu răspunde, bare săptămânale din Alpha Vantage), orizont de 20 de zile de tranzacționare (~4 săptămâni). Modelul învățat folosește semnale cu dovezi publicate (momentum pe 12 luni, revenirea după ultima lună, apropierea de maximul pe 52 de săptămâni, volatilitate, volum neobișnuit, trend, starea pieței), e verificat an cu an doar pe ani pe care nu i-a văzut, iar procentele lui sunt recalibrate pe acele rezultate. Lista conține companiile mari de azi, deci trecutul arată puțin mai bine decât a fost (survivorship bias). Analiza completă adaugă fundamentale, știri, rezultate trimestriale, insideri și, la semnale neclare, opinia lui Claude.</p>
+    <p>Metodă: prețuri zilnice din Twelve Data (dacă nu răspunde, bare săptămânale din Alpha Vantage), orizont de 20 de zile de tranzacționare (~4 săptămâni). Doar bare închise; fiecare serie trece prin verificări de calitate (split-uri neajustate, date vechi, zile lipsă, cotații înghețate, volum, lichiditate), iar seriile slabe nu intră în model. Modelul învățat folosește semnale cu dovezi publicate (momentum pe 12 luni, revenirea după ultima lună, apropierea de maximul pe 52 de săptămâni, volatilitate, beta, volum neobișnuit, trend, starea pieței), cu intrare la închiderea de a doua zi, e verificat an cu an doar pe ani pe care nu i-a văzut, iar procentele lui sunt recalibrate pe acele rezultate. Prețurile nu sunt ajustate pentru dividende (conectorul nu oferă asta). Lista conține companiile mari de azi, deci trecutul arată puțin mai bine decât a fost (survivorship bias). Analiza completă adaugă fundamentale, știri, rezultate trimestriale, insideri și, la semnale neclare, opinia lui Claude.</p>
   </footer>
 </div>
 
@@ -858,6 +875,8 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       analystCount: 0,
       targetPrice: null,
       beta: num(px.beta),
+      high52: num(px.fifty_two_week_high),
+      low52: num(px.fifty_two_week_low),
       marketCap: num(val.market_capitalization),
     };
   }
@@ -986,24 +1005,43 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     return weeks;
   }
 
-  // Prețuri: zilnic din Twelve Data; dacă nu merge, săptămânal din Alpha Vantage.
+  // Ora din New York: bursa se închide la 16:00. Până atunci, bara zilei (sau a săptămânii) e incompletă.
+  function nyNow() {
+    const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric", month: "2-digit",
+      day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date()).map((x) => [x.type, x.value]));
+    return { date: `${p.year}-${p.month}-${p.day}`, minutes: (Number(p.hour) % 24) * 60 + Number(p.minute) };
+  }
+  const CLOSE_MIN = 16 * 60 + 15; // 16:15, ca furnizorul să fi publicat prețul de închidere
+  const marketStamp = () => { const ny = nyNow(); return `${ny.date}|${ny.minutes >= CLOSE_MIN ? "închis" : "deschis"}`; };
+  // Un profesionist lucrează doar cu bare închise: bara de azi (sau săptămâna în curs) are preț și volum parțiale.
+  function dropPartialBar(bars, freq) {
+    const ny = nyNow(), last = bars[bars.length - 1];
+    if (!last) return bars;
+    const wd = new Date(ny.date + "T00:00:00Z").getUTCDay();
+    const partial = freq === "D"
+      ? last.d === ny.date && ny.minutes < CLOSE_MIN
+      : last.d >= mondayOf(ny.date) && wd >= 1 && wd <= 5 && !(wd === 5 && ny.minutes >= CLOSE_MIN);
+    return partial ? bars.slice(0, -1) : bars;
+  }
+
+  // Prețuri: zilnic din Twelve Data; dacă nu merge, săptămânal din Alpha Vantage. Doar bare închise.
   async function getBars(mcp, t) {
     const hit = store.get(K.bars(t));
-    if (hit && hit.day === today() && Array.isArray(hit.bars) && hit.bars.length) { resolvePredictions(t, hit.bars); return hit; }
+    if (hit && hit.day === today() && hit.stamp === marketStamp() && Array.isArray(hit.bars) && hit.bars.length) { resolvePredictions(t, hit.bars); return hit; }
     let out = null, tdErr = null;
     if (!tdOff) {
       try {
-        out = { freq: "D", bars: parseTdSeries(await tdCall(mcp, "get_time_series", { symbol: t, interval: "1day", outputsize: 3000 })) };
+        out = { freq: "D", bars: dropPartialBar(parseTdSeries(await tdCall(mcp, "get_time_series", { symbol: t, interval: "1day", outputsize: 3000 })), "D") };
       } catch (e) { tdErr = e; }
     }
     if (!out) {
       try {
-        out = { freq: "W", bars: await getWeekly(mcp, t) };
+        out = { freq: "W", bars: dropPartialBar(await getWeekly(mcp, t), "W") };
       } catch (e) {
         throw tdErr && tdErr.kind === "no_data" ? tdErr : e;
       }
     }
-    cachePut(K.bars(t), { day: today(), ...out });
+    cachePut(K.bars(t), { day: today(), stamp: marketStamp(), ...out });
     resolvePredictions(t, out.bars);
     return out;
   }
@@ -1333,6 +1371,92 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     }, sc.tech, sc.ticker);
   }
 
+  // ---------- calitatea datelor și regulile de selecție ----------
+  // Verificările pe care le face un desk profesionist înainte să folosească o serie de prețuri:
+  // salturi care arată ca un split neajustat, date vechi, zile lipsă, prețuri înghețate, volum lipsă,
+  // istoric prea scurt și lichiditate. O serie slabă nu intră în model și nici în clasament.
+  const SPLIT_RATIOS = [1.5, 2, 3, 4, 5, 8, 10, 15, 20, 25, 30, 40, 50];
+  const PRO = { minAdv: 20e6, minPrice: 5, maxPerSector: 2 };
+  const calDays = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 864e5);
+  function businessDaysSince(iso) {
+    let n = 0;
+    for (let d = addDays(iso, 1); d <= today(); d = addDays(d, 1)) { const w = new Date(d + "T00:00:00Z").getUTCDay(); if (w % 6) n++; }
+    return n;
+  }
+
+  function checkBars(bars, f, overview) {
+    const n = bars.length, daily = f.key === "D", perYear = daily ? 252 : 52;
+    const checks = [], suspect = [];
+    let penalty = 0, extreme = 0;
+    for (let i = 1; i < n; i++) {
+      const r = bars[i].c / bars[i - 1].c;
+      if (!(r > 0) || Math.abs(Math.log(r)) <= Math.log(1.45)) continue;
+      const k = r < 1 ? 1 / r : r;
+      if (SPLIT_RATIOS.some((x) => Math.abs(k / x - 1) < 0.03)) suspect.push(i); else extreme++;
+    }
+    const recentSuspect = suspect.filter((i) => i > n - 1 - 3 * perYear);
+    if (recentSuspect.length) penalty += 40;
+    else if (suspect.length) penalty += 10;
+    checks.push({ ok: !suspect.length, label: "Fără split-uri neajustate",
+      detail: suspect.length ? `${suspect.length === 1 ? "o zi" : `${suspect.length} zile`} cu salturi de tip split (ultima: ${fmtDate(bars[suspect[suspect.length - 1]].d)}); perioadele din jur nu intră în model` : "nicio mișcare de o zi de tip 2:1, 3:1, 10:1" });
+
+    const last = bars[n - 1].d, late = businessDaysSince(last);
+    const stale = late > 3;
+    if (stale) penalty += 30;
+    checks.push({ ok: !stale, label: "Date la zi", detail: `ultima zi: ${fmtDate(last)}${stale ? ` (acum ${late} zile lucrătoare)` : ""}` });
+
+    const from = Math.max(1, n - 3 * perYear);
+    let gaps = 0, flat = 0, run = 0;
+    for (let i = from; i < n; i++) {
+      if (calDays(bars[i - 1].d, bars[i].d) > (daily ? 6 : 12)) gaps++;
+      run = bars[i].c === bars[i - 1].c ? run + 1 : 0;
+      if (run === (daily ? 4 : 2)) flat++;
+    }
+    penalty += Math.min(20, gaps * 5) + (flat ? 15 : 0);
+    checks.push({ ok: !gaps, label: "Fără zile lipsă", detail: gaps ? `${gaps} ${gaps === 1 ? "gol" : "goluri"} mai lungi de o săptămână în ultimii 3 ani` : "seria e completă în ultimii 3 ani" });
+    checks.push({ ok: !flat, label: "Prețuri care se mișcă", detail: flat ? "prețul a rămas identic mai multe zile la rând (cotație înghețată)" : "nicio cotație înghețată" });
+
+    const lastYear = bars.slice(-perYear);
+    const zeroVol = lastYear.filter((b) => !(b.v > 0)).length / Math.max(1, lastYear.length);
+    if (zeroVol > 0.05) penalty += 10;
+    checks.push({ ok: zeroVol <= 0.05, label: "Volum raportat", detail: zeroVol > 0.05 ? `lipsește în ${pct(zeroVol)} din zilele ultimului an` : "volum în fiecare zi" });
+
+    const years = n / perYear;
+    if (years < 2) penalty += 10;
+    checks.push({ ok: years >= 2, label: "Istoric suficient", detail: `${years.toFixed(1).replace(".", ",")} ani de ${daily ? "prețuri zilnice" : "bare săptămânale"}` });
+
+    const recent = bars.slice(daily ? -20 : -4);
+    const adv = recent.reduce((acc, b) => acc + b.c * (b.v || 0), 0) / recent.length / (daily ? 1 : 5);
+    const price = bars[n - 1].c;
+    const liquid = adv >= PRO.minAdv && price >= PRO.minPrice;
+    checks.push({ ok: liquid, label: "Lichiditate", detail: `${usdShort(adv)} tranzacționați pe zi, preț ${money(price)}${liquid ? "" : ` (minim ${usdShort(PRO.minAdv)} pe zi și ${PRO.minPrice} $)`}` });
+
+    // Verificare încrucișată: maximul anual din serie față de cel raportat separat de Twelve Data.
+    if (overview && fin(overview.high52) && overview.high52 > 0 && daily && n > perYear) {
+      const hi = Math.max(...bars.slice(-perYear).map((b) => b.c)), ratio = hi / overview.high52;
+      const match = ratio <= 1.03 && ratio >= 0.85;
+      if (!match) penalty += 15;
+      checks.push({ ok: match, label: "Sursele se potrivesc", detail: `maximul pe 52 de săptămâni: ${money(hi)} în serie, ${money(overview.high52)} raportat${match ? "" : " (diferență mare: prețuri posibil neajustate)"}` });
+    }
+    if (extreme) checks.push({ ok: true, label: "Mișcări extreme", detail: `${extreme} ${extreme === 1 ? "zi" : "zile"} cu mișcări de peste 45% (păstrate: par reale, nu split-uri)` });
+
+    const score = Math.max(0, 100 - penalty);
+    return { score, grade: score >= 80 ? "bună" : score >= 50 ? "acceptabilă" : "slabă", checks, suspect, adv, price, stale, liquid };
+  }
+  const usdShort = (x) => !fin(x) ? "n/a" : x >= 1e9 ? `${(x / 1e9).toFixed(1).replace(".", ",")} mld. $` : x >= 1e6 ? `${Math.round(x / 1e6)} mil. $` : `${Math.round(x / 1e3)} mii $`;
+
+  // Cine poate intra în „Șanse mari”: date bune, la zi, lichide. Scanările vechi nu au verificarea încă.
+  function tradable(sc) {
+    const q = sc && sc.q;
+    if (!q) return { ok: true, why: [] };
+    const why = [];
+    if (q.g === "slabă") why.push("date de calitate slabă");
+    if (q.stale) why.push("date vechi");
+    if (fin(q.adv) && q.adv * 1e6 < PRO.minAdv) why.push("lichiditate mică");
+    if (fin(sc.price) && sc.price < PRO.minPrice) why.push(`preț sub ${PRO.minPrice} $`);
+    return { ok: !why.length, why };
+  }
+
   /* model-core:start */
   // ---------- modelul învățat din toate acțiunile scanate ----------
   // La fiecare scanare păstrăm, din 20 în 20 de zile de tranzacționare (ferestre care nu se suprapun), semnalele
@@ -1343,10 +1467,10 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
   // (Daniel și Moskowitz), de aceea are un termen separat pentru acel caz.
   // Modelul e o regresie logistică cu penalizare, verificată an cu an doar pe ani pe care nu i-a văzut,
   // iar procentele afișate sunt recalibrate pe acele rezultate (dacă modelul nu a ajutat, ele rămân la medie).
-  const TV = 1;       // versiunea datelor de antrenare; o schimbare cere o nouă scanare
+  const TV = 2;       // versiunea datelor de antrenare; o schimbare cere o nouă scanare
   const HZ = 20;      // orizontul: 20 de zile de tranzacționare
   const LOOK = 252;   // fiecare observație are nevoie de un an de istoric
-  const RAW_N = 10;
+  const RAW_N = 11;
   const MODEL_MIN_STOCKS = 15;
   const r3 = (x) => Math.round(x * 1000) / 1000;
   const sigm = (z) => 1 / (1 + Math.exp(-z));
@@ -1364,11 +1488,11 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
 
   function spySeries(bars) {
     const c = bars.map((b) => b.c);
-    return { d: bars.map((b) => b.d), c, s50: sma(c, 50), s200: sma(c, 200) };
+    return { d: bars.map((b) => b.d), c, s50: sma(c, 50), s200: sma(c, 200), pos: new Map(bars.map((b, k) => [b.d, k])) };
   }
 
   // Semnalele din ziua i, calculate doar din trecut.
-  function rawAt(c, v, sma200, tech, i, spy, j) {
+  function rawAt(c, v, d, sma200, tech, i, spy, j) {
     if (i < LOOK || j < LOOK || !fin(sma200[i]) || !fin(tech[i]) || !fin(spy.s200[j])) return null;
     let hi = 0;
     for (let k = i - 251; k <= i; k++) if (c[k] > hi) hi = c[k];
@@ -1377,6 +1501,16 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     const vol = Math.sqrt(Math.max(0, (s2 - (s * s) / 60) / 59) * 252);
     let v20 = 0, v250 = 0;
     for (let k = i - 249; k <= i; k++) { const x = v[k] || 0; v250 += x; if (k > i - 20) v20 += x; }
+    // Beta față de S&P 500 pe ultimul an, din randamentele zilnice din aceleași zile (Frazzini și Pedersen).
+    let mx = 0, my = 0, mxx = 0, mxy = 0, m = 0;
+    for (let k = i - 251; k <= i; k++) {
+      const a = spy.pos.get(d[k]), b = spy.pos.get(d[k - 1]);
+      if (a == null || b == null) continue;
+      const rs = Math.log(c[k] / c[k - 1]), rm = Math.log(spy.c[a] / spy.c[b]);
+      mx += rm; my += rs; mxx += rm * rm; mxy += rm * rs; m++;
+    }
+    const varM = m ? mxx / m - (mx / m) ** 2 : 0;
+    const beta = m >= 200 && varM > 0 ? (mxy / m - (mx / m) * (my / m)) / varM : NaN;
     const x = [
       c[i - 21] / c[i - 252] - 1,
       c[i] / c[i - 21] - 1,
@@ -1388,6 +1522,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       spy.c[j] / spy.c[j - 21] - 1,
       0.5 * Math.sign(spy.c[j] - spy.s200[j]) + 0.5 * Math.sign(spy.s50[j] - spy.s200[j]),
       spy.c[j] / spy.c[j - 252] - 1,
+      beta,
     ];
     return x.every(fin) ? x.map(r3) : null;
   }
@@ -1399,23 +1534,28 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
   function rawNow(bars, ind, spy) {
     const n = bars.length, j = idxOnOrBefore(spy.d, bars[n - 1].d);
     if (!spyNear(spy, j, bars[n - 1].d)) return null;
-    return rawAt(bars.map((b) => b.c), bars.map((b) => b.v || 0), ind.sma40, ind.score, n - 1, spy, j);
+    return rawAt(bars.map((b) => b.c), bars.map((b) => b.v || 0), bars.map((b) => b.d), ind.sma40, ind.score, n - 1, spy, j);
   }
 
   // Observațiile din trecut (cele mai recente primele) și semnalele de azi.
-  function trainingData(bars, ind, spy) {
-    const c = bars.map((b) => b.c), v = bars.map((b) => b.v || 0), n = c.length;
+  // `suspect`: zilele cu salturi care arată ca un split neajustat; ferestrele care le conțin nu intră în model.
+  function trainingData(bars, ind, spy, suspect = []) {
+    const c = bars.map((b) => b.c), v = bars.map((b) => b.v || 0), dd = bars.map((b) => b.d), n = c.length;
     const near = (j, iso) => spyNear(spy, j, iso);
     const jAt = (iso) => idxOnOrBefore(spy.d, iso);
     const now = rawNow(bars, ind, spy);
     const d = [], x = [];
     let up = "", bt = "";
-    for (let i = n - 1 - HZ; i >= LOOK; i -= HZ) {
-      const j = jAt(bars[i].d), j2 = jAt(bars[i + HZ].d);
-      if (!near(j, bars[i].d) || !near(j2, bars[i + HZ].d) || j2 <= j) continue;
-      const xi = rawAt(c, v, ind.sma40, ind.score, i, spy, j);
+    // Semnalul se calculează la închiderea zilei i; intrarea realistă e la închiderea următoare (i + 1),
+    // ieșirea după încă HZ zile. Așa nu câștigăm pe hârtie o zi pe care n-am fi putut-o tranzacționa.
+    for (let i = n - 2 - HZ; i >= LOOK; i -= HZ) {
+      const e0 = i + 1, e1 = i + 1 + HZ;
+      const j = jAt(bars[i].d), j0 = jAt(bars[e0].d), j1 = jAt(bars[e1].d);
+      if (!near(j, bars[i].d) || !near(j0, bars[e0].d) || !near(j1, bars[e1].d) || j1 <= j0) continue;
+      if (suspect.some((k) => k > i - LOOK && k <= e1)) continue;
+      const xi = rawAt(c, v, dd, ind.sma40, ind.score, i, spy, j);
       if (!xi) continue;
-      const ret = c[i + HZ] / c[i] - 1, mret = spy.c[j2] / spy.c[j] - 1;
+      const ret = c[e1] / c[e0] - 1, mret = spy.c[j1] / spy.c[j0] - 1;
       d.push(bars[i].d);
       x.push(xi);
       up += ret > 0 ? "1" : "0";
@@ -1435,6 +1575,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     ["mret", "S&P 500 în ultima lună", (r) => clip(r[7], -0.3, 0.3)],
     ["mreg", "trendul S&P 500", (r) => r[8]],
     ["momBear", "momentum după un an slab al pieței", (r) => (r[9] < 0 ? Math.log1p(clip(r[0], -0.9, 4)) : 0)],
+    ["beta", "beta față de S&P 500", (r) => clip(r[10], -0.5, 3)],
   ];
   const design = (r) => FEAT.map((f) => f[2](r));
 
@@ -1509,7 +1650,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     const years = [...new Set(rows.map((r) => Number(r.d.slice(0, 4))))].sort((a, b) => a - b);
     const oos = [], perYear = [];
     for (const Y of years.slice(3)) {
-      const cut = `${Y - 1}-12-01`, tag = String(Y);
+      const cut = `${Y - 1}-11-26`, tag = String(Y);
       const train = rows.filter((r) => r.d < cut), test = rows.filter((r) => r.d.startsWith(tag));
       if (train.length < 400 || test.length < 20) continue;
       const m = trainModel(train);
@@ -1658,7 +1799,10 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
   const modelFor = (x) => ({ up: modelPredict(models.up, x), beat: modelPredict(models.beat, x) });
   // Cea mai bună estimare disponibilă: modelul, dacă e gata, altfel istoricul acțiunii.
   const bestEstimate = (model, honest) => (model.up ? { ...model.up, src: "model" } : honest ? { ...honest, src: "hist" } : null);
-  const modelStocks = () => [...trainDocs.values()].filter((d) => d && d.tv === TV && !etf(d.ticker)).length;
+  // Două clase de acțiuni ale aceleiași companii au aproape aceleași prețuri: în model contează o singură dată.
+  const SAME_COMPANY = { GOOG: "GOOGL", "BRK.A": "BRK.B", FOX: "FOXA", NWS: "NWSA", UA: "UAA", "LEN.B": "LEN", "HEI.A": "HEI" };
+  const duplicateClass = (t) => !!SAME_COMPANY[t] && trainDocs.has(SAME_COMPANY[t]);
+  const modelStocks = () => [...trainDocs.values()].filter((d) => d && d.tv === TV && !etf(d.ticker) && !duplicateClass(d.ticker)).length;
   {
     const hit = store.get(K.bars("SPY"));
     if (hit && hit.freq === "D" && Array.isArray(hit.bars) && hit.bars.length > LOOK + 30) spyData = { day: hit.day, ...spySeries(hit.bars) };
@@ -1667,7 +1811,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
   function scheduleModel() {
     clearTimeout(modelTimer);
     modelTimer = setTimeout(() => {
-      const docs = [...trainDocs.values()].filter((d) => d && d.tv === TV && !etf(d.ticker));
+      const docs = [...trainDocs.values()].filter((d) => d && d.tv === TV && !etf(d.ticker) && !duplicateClass(d.ticker));
       const sig = docs.map((d) => `${d.ticker}:${d.last}`).sort().join(",");
       if (sig === modelSig) return;
       modelSig = sig;
@@ -1734,10 +1878,13 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     scores.composite = compositeScore(scores);
     const rule = decide(scores.composite);
     const honest = honestOdds(odds, ind.score[i], entry.ticker);
+    const quality = checkBars(entry.weeks, f, entry.overview);
     const x = f.key === "D" && spyData && !etf(entry.ticker) ? rawNow(entry.weeks, ind, spyData) : null;
     const model = modelFor(x);
     const est = bestEstimate(model, honest);
-    return { ind, i, f, scores, rule, odds, honest, x, model, est, events, reasons: findAmbiguity(scores, rule, est) };
+    const reasons = findAmbiguity(scores, rule, est);
+    if (quality.grade === "slabă") reasons.push(`datele de preț au probleme (${quality.checks.filter((c) => !c.ok).map((c) => c.label.toLowerCase()).join(", ")})`);
+    return { ind, i, f, scores, rule, odds, honest, quality, x, model, est, events, reasons };
   }
 
   // Modelul se reface când se adaugă acțiuni scanate; analiza deschisă primește noile procente.
@@ -1855,9 +2002,11 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       h: f.horizon,
       spark,
     };
+    const q = checkBars(weeks, f);
+    rec.q = { s: q.score, g: q.grade, stale: q.stale, adv: r1(q.adv / 1e6), bad: q.checks.filter((c) => !c.ok).map((c) => c.label) };
     let train = null;
-    if (f.key === "D" && spyData && !etf(t)) {
-      const td = trainingData(weeks, ind, spyData);
+    if (f.key === "D" && spyData && !etf(t) && q.grade !== "slabă") {
+      const td = trainingData(weeks, ind, spyData, q.suspect);
       if (td.now) { rec.x = td.now; rec.tv = TV; }
       if (td.d.length >= 24) train = { ticker: t, tv: TV, last: weeks[i].d, d: td.d, x: td.x, up: td.up, bt: td.bt };
     }
@@ -1876,6 +2025,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
   function saveScan(t, rec) {
     const prev = scans.get(t);
     if (!rec.full && prev && prev.full && prev.full.week === rec.week) rec.full = prev.full;
+    if (!rec.next && prev && typeof prev.next === "string" && prev.next >= today()) rec.next = prev.next;
     scans.set(t, rec);
     renderRanking();
     renderDirectory();
@@ -1893,6 +2043,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       composite: r1(a.scores.composite),
       claudeProb: fd.v && fin(fd.v.probability_up_pct) ? fd.v.probability_up_pct : null,
     };
+    if (a.events.next) rec.next = a.events.next.date;
     saveScan(entry.ticker, rec);
     saveTrain(entry.ticker, train);
     if (a.honest) recordPrediction(entry.ticker, rec.week, a.honest.p, a.honest.base, "stat");
@@ -2220,6 +2371,12 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
         all_scanned_stocks_similar_score: r4(a.honest.poolP),
       } : null,
       next_earnings: a.events.next,
+      data_quality: {
+        score_0_100: a.quality.score,
+        grade: a.quality.grade,
+        failed_checks: a.quality.checks.filter((c) => !c.ok).map((c) => `${c.label}: ${c.detail}`),
+        avg_daily_dollar_volume: Math.round(a.quality.adv),
+      },
       avg_return_when_score_similar: odds ? r4(odds.avgRet) : null,
       track_record: (() => { const t = trackStats(); const f2 = (x) => x && { verified: x.n, brier_skill_vs_base: r4(x.skill) }; return { page_statistics: f2(t.stat), learned_model: f2(t.model), claude: f2(t.claude) }; })(),
       fundamentals: entry.overview,
@@ -2241,6 +2398,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       "- Pornește de la estimarea statistică (statistical_estimate) și intervalul ei de 90%. Rămâi în interval, cu excepția cazului în care ai motive puternice și concrete, pe care le spui explicit.",
       "- Majoritatea semnalelor publice au efecte mici; o probabilitate peste 65% sau sub 40% pe 4 săptămâni e rară și cere dovezi excepționale.",
       "- model_validation arată cât a ajutat modelul pe ani pe care nu i-a văzut. Dacă ranking_helped_significantly e false, diferențele față de medie sunt probabil zgomot.",
+      "- Dacă data_quality are verificări picate, spune-o și fii mai prudent: procentele pot fi afectate de date greșite.",
       "- Dacă next_earnings cade în următoarele 4 săptămâni, prețul poate sări mult în orice direcție: fii mai prudent și spune asta la riscuri.",
       "- Când dovezile sunt slabe sau contradictorii, HOLD cu încredere scăzută este un răspuns bun.",
       "- Ai și surprizele la rezultatele trimestriale, tranzacțiile insiderilor (clasificare aproximativă) și trendul S&P 500. Cumpărările mai multor insideri sunt mai informative decât vânzările, care sunt adesea de rutină.",
@@ -2359,9 +2517,11 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     if (m && m.ready) {
       const g = m.groups, top = g[g.length - 1], bottom = g[0];
       const yrs = `${m.years[0].year}–${m.years[m.years.length - 1].year}`;
+      const bear = marketDoc && marketDoc.score <= -40;
       box.replaceChildren(el("span", { text:
         `Testat pe ${yrs}, doar pe ani pe care modelul nu i-a văzut: cele mai bune 20% după model ${tg.verb} în ${pct(top.act)} din cazuri (interval ${pct(top.lo)}–${pct(top.hi)}), cele mai slabe 20% în ${pct(bottom.act)}, media ${pct(m.overall)}. ` +
-        (modelHelps(m) ? "Diferența e sigură statistic." : "Diferența nu e încă sigură statistic, așa că procentele rămân aproape de medie.") }));
+        (modelHelps(m) ? "Diferența e sigură statistic." : "Diferența nu e încă sigură statistic, așa că procentele rămân aproape de medie.") +
+        (bear && curTarget() === "up" ? " Piața e în scădere: în astfel de perioade urcă mai puține acțiuni, iar „Bate S&P 500” spune mai mult decât „Crește”." : "") }));
     } else {
       const k = modelStocks(), need = Math.max(1, MODEL_MIN_STOCKS - k);
       box.replaceChildren(el("span", { text: k >= MODEL_MIN_STOCKS
@@ -2389,9 +2549,20 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     $("rankSub").textContent = byModel
       ? `Șansele estimate ${cur === "beat" ? "să bată S&P 500" : "de creștere"} în următoarele 4 săptămâni, de un model învățat din toate acțiunile scanate (momentum, apropierea de maximul anual, volatilitate, volum, trend, piață) și verificat pe ani pe care nu i-a văzut. Cifra după ± arată cât de nesigură e estimarea.`
       : "Șansele estimate de creștere în următoarele 4 săptămâni, din istoricul acțiunii și al tuturor acțiunilor scanate cu un scor tehnic similar (ultimii 10 ani). Cifra după ± arată cât de nesigură e estimarea.";
-    const all = ranked();
+    $("rankSub").textContent += ` Intră doar acțiunile cu date verificate, lichide (peste ${usdShort(PRO.minAdv)} pe zi) și cel mult ${PRO.maxPerSector} din același sector.`;
+    const all = ranked().filter((x) => tradable(x.s).ok);
     const fresh = all.filter((x) => daysAgo(x.s.scannedAt) < CFG.staleDays + 2);
-    const top = (fresh.length >= 3 ? fresh : all).slice(0, 6);
+    // Ca la un portofoliu profesionist: cel mult două acțiuni din același sector.
+    const perSector = new Map(), top = [];
+    for (const x of fresh.length >= 3 ? fresh : all) {
+      const sec = (dir.get(x.s.ticker) || {}).sector || "Altele";
+      if ((perSector.get(sec) || 0) >= PRO.maxPerSector) continue;
+      const twin = SAME_COMPANY[x.s.ticker] || Object.keys(SAME_COMPANY).find((k) => SAME_COMPANY[k] === x.s.ticker);
+      if (twin && top.some((y) => y.s.ticker === twin)) continue;
+      perSector.set(sec, (perSector.get(sec) || 0) + 1);
+      top.push(x);
+      if (top.length >= 6) break;
+    }
     if (!top.length) {
       box.replaceChildren(el("div", { class: "empty" },
         el("p", { text: scanJob ? "Scanez primele acțiuni, clasamentul apare imediat…" : !dirReady ? "Se încarcă lista de acțiuni…" : "Încă nu e nicio acțiune scanată. Scanarea folosește o cerere Twelve Data pentru fiecare acțiune." }),
@@ -2406,6 +2577,9 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
           el("span", { class: "card-nm", text: nameOf(s.ticker) || " " }),
           el("span", { class: "card-p", text: pct(h.p) }),
           el("span", { class: "card-sub", text: `±${half} pp · de obicei ${pct(h.base)}` }),
+          Array.isArray(s.x) && fin(s.x[3]) ? el("span", { class: "card-sub", text: `mișcare tipică în 4 săpt.: ±${Math.round(s.x[3] * Math.sqrt(20 / 252) * 100)}%` }) : null,
+          typeof s.next === "string" && s.next >= today() && calDays(today(), s.next) <= 28
+            ? el("span", { class: "card-flag", text: `raport trimestrial în ${calDays(today(), s.next)} zile` }) : null,
           h.sure ? el("span", { class: `sure${h.sure === "down" ? " down" : ""}`, text: h.sure === "up" ? "▲ peste medie, sigur statistic" : "▼ sub medie, sigur statistic" }) : null,
           sparkline(s.spark || []),
           el("span", { class: "card-sub", text: `6 luni ${spct(s.chg26w, 0)} · scanat ${whenText(s.scannedAt)}` }));
@@ -2420,7 +2594,8 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     const total = dir.size;
     const doneFresh = [...dir.keys()].filter((t) => scans.has(t) && daysAgo(scans.get(t).scannedAt) < CFG.staleDays).length;
     const sel = el("select", { class: "field", id: "scanCount", "aria-label": "Câte acțiuni scanez" },
-      [5, 10, 25, 50].map((n) => el("option", { value: n, text: `${n} acțiuni`, selected: n === 10 })));
+      [5, 10, 25, 50].map((n) => el("option", { value: n, text: `${n} acțiuni`, selected: n === 10 })),
+      el("option", { value: total, text: `toată lista (${total}, ~${Math.ceil((total * 7.6) / 60)} min)` }));
     const prevSel = document.getElementById("scanCount");
     if (prevSel) sel.value = prevSel.value;
     const controls = scanJob
@@ -2465,6 +2640,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
         el("th", { text: "Simbol" }), el("th", { text: "Companie" }), el("th", { class: "col-sector", text: "Sector" }),
         el("th", { class: "r", text: "Crește, 4 săpt." }), el("th", { class: "r col-sector", text: "Interval 90%" }), el("th", { class: "r", text: "De obicei" }),
         beatOn ? el("th", { class: "r", text: "Bate S&P 500" }) : null,
+        el("th", { class: "col-sector", text: "Date" }),
         el("th", { text: "Semnal" }), el("th", { class: "col-when", text: "Scanat" }))),
       el("tbody", null, rows.map((d) => {
         const s = scans.get(d.ticker);
@@ -2483,6 +2659,8 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
           el("td", { class: "r num col-sector", text: ok ? `${pct(h.lo)}–${pct(h.hi)}` : "" }),
           el("td", { class: "r num", text: ok ? pct(h.base) : "" }),
           beatOn ? el("td", { class: "r num", text: e.beat ? pct(e.beat.p) : "" }) : null,
+          el("td", { class: "col-sector note", title: s && s.q && s.q.bad.length ? `Probleme: ${s.q.bad.join(", ")}` : null,
+            text: s && s.q ? `${s.q.g}${tradable(s).ok ? "" : ` · ${tradable(s).why.join(", ")}`}` : "" }),
           el("td", null, signal || (canScan
             ? el("button", { class: "btn ghost tiny", type: "button", text: "Scanează",
                 onclick: (ev) => { ev.stopPropagation(); startScan(1, d.ticker); } })
@@ -2576,6 +2754,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     renderChart(entry, a);
     renderIndicators(a);
     renderModel(a);
+    renderQuality(a);
     renderScores(a);
     renderOdds(a);
     renderFundamentals(entry);
@@ -2680,7 +2859,9 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     const nx = a.events.next;
     const warn = nx && nx.days <= 28 ? el("p", { class: "warn" }, el("strong", { text: "Raport trimestrial " }),
       `pe ${fmtDate(nx.date)} (${nx.days === 0 ? "azi" : nx.days === 1 ? "mâine" : `în ${nx.days} zile`}), în perioada estimată. În ziua raportului prețul poate sări mult, în orice direcție, iar statistica nu știe rezultatul.`) : null;
-    $("verdict").replaceChildren(nameBlock, dec, nums, ...(warn ? [warn] : []));
+    const qWarn = a.quality.grade === "slabă" ? el("p", { class: "warn" }, el("strong", { text: "Date cu probleme: " }),
+      `${a.quality.checks.filter((c) => !c.ok).map((c) => c.label.toLowerCase()).join(", ")}. Tratează procentele cu prudență.`) : null;
+    $("verdict").replaceChildren(nameBlock, dec, nums, ...(qWarn ? [qWarn] : []), ...(warn ? [warn] : []));
   }
 
   // ----- chart -----
@@ -2852,6 +3033,20 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       el("div", { class: "range-scale", "aria-hidden": "true" }, el("span", { text: "30%" }), el("span", { text: "55%" }), el("span", { text: "80%" })));
   }
 
+  // Ce a rămas în afara modelului și de ce (igiena datelor, la vedere).
+  function excludedText() {
+    const poor = [], twins = [];
+    for (const sc of scans.values()) {
+      if (sc.error || etf(sc.ticker)) continue;
+      if (sc.q && sc.q.g === "slabă") poor.push(sc.ticker);
+      else if (duplicateClass(sc.ticker)) twins.push(sc.ticker);
+    }
+    const parts = [];
+    if (poor.length) parts.push(`${poor.join(", ")} (date slabe)`);
+    if (twins.length) parts.push(`${twins.join(", ")} (aceeași companie cu altă clasă de acțiuni)`);
+    return parts.length ? ` Excluse din model: ${parts.join("; ")}. ETF-urile nu intră în model.` : " ETF-urile nu intră în model.";
+  }
+
   function renderModel(a) {
     const box = $("model");
     const mu = models.up;
@@ -2876,6 +3071,10 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
           p.sure ? el("span", { class: `sure${p.sure === "down" ? " down" : ""}`, text: p.sure === "up" ? "▲ peste medie, sigur statistic" : "▼ sub medie, sigur statistic" }) : null));
       }
     }
+    if (a.x && fin(a.x[3])) {
+      const move = a.x[3] * Math.sqrt(20 / 252);
+      kids.push(el("p", { class: "note", text: `Mișcare tipică în 4 săptămâni: ±${pct(move)} (din volatilitatea ultimelor 60 de zile). Beta față de S&P 500: ${fin(a.x[10]) ? a.x[10].toFixed(2).replace(".", ",") : "n/a"} (1 = se mișcă la fel ca piața, peste 1 = îi amplifică mișcările, sub 1 = le atenuează).` }));
+    }
     const tr = (k) => {
       const m = models[k];
       if (!m || !m.ready) return null;
@@ -2887,7 +3086,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     const m0 = mu;
     kids.push(el("div", null,
       el("h3", { text: "Cum a fost testat" }),
-      el("p", { class: "note", text: `Pentru fiecare an din ${m0.years[0].year}–${m0.years[m0.years.length - 1].year}, modelul a învățat doar din anii dinainte și a fost verificat pe acel an: ${m0.n.toLocaleString("ro-RO")} cazuri din ${m0.stocks} acțiuni. Acțiunile se mișcă împreună, așa că valorează cam ${Math.round(m0.nEff).toLocaleString("ro-RO")} cazuri independente.` }),
+      el("p", { class: "note", text: `Pentru fiecare an din ${m0.years[0].year}–${m0.years[m0.years.length - 1].year}, modelul a învățat doar din anii dinainte și a fost verificat pe acel an: ${m0.n.toLocaleString("ro-RO")} cazuri din ${m0.stocks} acțiuni. Acțiunile se mișcă împreună, așa că valorează cam ${Math.round(m0.nEff).toLocaleString("ro-RO")} cazuri independente.${excludedText()}` }),
       el("div", { class: "table-scroll" }, el("table", null,
         el("thead", null, el("tr", null, el("th", { text: "Ce estimăm" }), el("th", { class: "r", text: "Cele mai slabe 20%" }), el("th", { class: "r", text: "Cele mai bune 20%" }), el("th", { class: "r", text: "Media" }), el("th", { text: "Sigur statistic" }))),
         el("tbody", null, tr("up"), tr("beat")))),
@@ -2905,6 +3104,17 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
           : "În ordinea importanței. Modelul nu a ajutat încă sigur statistic pe anii nevăzuți, așa că această listă poate fi doar zgomot." })));
     }
     box.replaceChildren(...kids);
+  }
+
+  function renderQuality(a) {
+    const q = a.quality;
+    $("quality").replaceChildren(
+      el("p", { class: "q-head" }, el("span", { class: "q-grade", "data-g": q.grade, text: q.grade }), `${q.score} din 100 · ${a.f.source}`),
+      el("ul", { class: "checks" }, q.checks.map((c) => el("li", null,
+        el("span", { class: "g", "data-ok": c.ok ? "1" : "0", "aria-hidden": "true", text: c.ok ? "✓" : "✗" }),
+        el("span", { text: `${c.label}${c.ok ? "" : " (problemă)"}` }),
+        el("small", { text: c.detail })))),
+      el("p", { class: "note", text: `În „Șanse mari” intră doar acțiunile cu date bune sau acceptabile, la zi, cu cel puțin ${usdShort(PRO.minAdv)} tranzacționați pe zi și preț peste ${PRO.minPrice} $, cel mult ${PRO.maxPerSector} din același sector. Seriile slabe nu intră în model.` }));
   }
 
   function renderScores(a) {

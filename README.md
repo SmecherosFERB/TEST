@@ -45,6 +45,29 @@ Componentele fără date sunt omise, iar ponderile se recalculează. Scor compus
    nu a contat sigur statistic, procentele rămân aproape de medie. Raportul arată cât de des s-a întâmplat
    lucrul estimat în fiecare cincime (de la cele mai slabe 20% la cele mai bune 20% după model).
 
+### Calitatea datelor și regulile de selecție
+
+Înainte ca o serie de prețuri să intre în analiză sau în model, e verificată ca la un desk profesionist:
+
+| Verificare | De ce contează | Ce se întâmplă dacă pică |
+|---|---|---|
+| Doar bare închise | în timpul ședinței, bara de azi are preț și volum parțiale | bara zilei curente e scoasă până la 16:15, ora New York |
+| Split-uri neajustate | un salt de o zi de tip 2:1, 3:1, 10:1 falsifică momentumul și rezultatele | ferestrele din jurul saltului (un an înainte, o lună după) nu intră în model |
+| Mișcări extreme reale | o prăbușire de −55% nu e un split | se păstrează, dar sunt semnalate |
+| Date la zi, zile lipsă, cotații înghețate, volum lipsă, istoric scurt | date vechi sau găurite dau semnale greșite | scor de calitate 0–100; seriile „slabe” nu intră în model și nici în clasament |
+| Verificare încrucișată | maximul pe 52 de săptămâni din serie trebuie să se potrivească cu cel raportat separat de Twelve Data | penalizare și avertizare |
+| Lichiditate | sub ~20 mil. $ tranzacționați pe zi, costurile mănâncă avantajul | acțiunea nu intră în „Șanse mari” |
+| Aceeași companie, două clase (GOOG/GOOGL) | ar număra de două ori aceleași date | în model contează o singură dată |
+
+Alte reguli de profesionist:
+
+- **Intrare realistă:** semnalul se calculează la închiderea zilei, dar rezultatul se măsoară de la închiderea
+  de a doua zi. Nu câștigăm pe hârtie o zi pe care n-am fi putut-o tranzacționa.
+- **Diversificare:** în „Șanse mari” intră cel mult două acțiuni din același sector.
+- **Risc la vedere:** fiecare acțiune arată mișcarea tipică pe 4 săptămâni (din volatilitate) și beta față de
+  S&P 500; acțiunile cu raport trimestrial în următoarele 4 săptămâni sunt marcate.
+- **Regimul pieței:** când S&P 500 e în scădere, pagina recomandă să te uiți la „bate S&P 500”, nu la „crește”.
+
 ### Cât de reale sunt procentele
 
 Trei lucruri fac diferența între un procent care arată bine și unul pe care te poți baza:
@@ -164,6 +187,8 @@ rezultate, insideri) și 1–2 Alpha Vantage (știri; calendarul rezultatelor, d
   șansele de la, de exemplu, 55% la 58–60% pentru cele mai bune acțiuni, nu la 80%.
 - Zilele similare din istoric **se suprapun**, deci `n` supraestimează câte cazuri independente există.
 - Lista de acțiuni conține companiile mari de **azi**. Testul pe trecut e deci ușor prea optimist (survivorship bias).
+- Conectorul Twelve Data nu oferă prețuri ajustate pentru dividende, doar pentru split-uri. Pentru „bate S&P 500”
+  diferența e mică (dividendele pe 4 săptămâni sunt ~0,1%), dar randamentele acțiunilor cu dividend mare sunt ușor subestimate.
 - Clasificarea insiderilor din Alpha Vantage e aproximativă (nu are codul tranzacției); SEC EDGAR e exact.
 - Procentele descriu trecutul. Nu garantează nimic despre viitor.
 
@@ -179,6 +204,7 @@ stockai/
   scoring.py       scorurile tehnic / fundamental / sentiment / compus
   signals.py       momentum, maxim 52 săpt., rezultate, insideri, trendul pieței, macro
   calibration.py   procentul istoric pentru scoruri similare
+  quality.py       calitatea datelor: split-uri, date vechi, goluri, lichiditate, bare incomplete
   model.py         modelul de probabilitate și testul walk-forward
   advisor.py       Claude: cerere cu output structurat și fallback automat la refuz
   analyzer.py      orchestrare + detectarea semnalelor neclare

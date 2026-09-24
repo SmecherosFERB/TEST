@@ -42,8 +42,8 @@ def test_build_dataset_labels_and_step():
     assert set(data["ticker"]) == {"S0", "S1"}
     assert data["label"].isin([0.0, 1.0]).all()
     assert data[FEATURES].notna().all().all()
-    # ultimele 20 de zile nu au încă rezultat, deci nu intră în setul de date
-    assert data["date"].max() <= prices["S0"].index[-21]
+    # ultimele 21 de zile nu au încă rezultat (intrare a doua zi + 20 de zile), deci nu intră în setul de date
+    assert data["date"].max() == prices["S0"].index[-22]
 
 
 def test_walk_forward_finds_real_signal_and_model_roundtrip(tmp_path):
@@ -101,10 +101,12 @@ def test_beat_target_labels_compare_with_market():
     data = build_dataset(prices, market, horizon=20, target="beat")
     close, m = prices["S0"]["Close"], market.reindex(prices["S0"].index, method="ffill")
     row = data[data["ticker"] == "S0"].iloc[0]
-    i = close.index.get_loc(row["date"])
-    stock_ret = close.iloc[i + 20] / close.iloc[i] - 1
-    market_ret = m.iloc[i + 20] / m.iloc[i] - 1
-    assert row["label"] == float(stock_ret > market_ret)
+    # intrarea e la închiderea de a doua zi, ieșirea după încă 20 de zile
+    for _, row in data[data["ticker"] == "S0"].iterrows():
+        i = close.index.get_loc(row["date"])
+        stock_ret = close.iloc[i + 21] / close.iloc[i + 1] - 1
+        market_ret = m.iloc[i + 21] / m.iloc[i + 1] - 1
+        assert row["label"] == float(stock_ret > market_ret)
     # implicit, ferestrele de 20 de zile nu se suprapun
     dates = pd.DatetimeIndex(data[data["ticker"] == "S0"]["date"])
     assert (np.diff(close.index.get_indexer(dates)) == 20).all()
@@ -131,3 +133,21 @@ def test_old_model_file_is_rejected(tmp_path):
     path.write_bytes(pickle.dumps(model))
     with pytest.raises(TypeError, match="versiune mai veche"):
         ProbabilityModel.load(path)
+
+
+def test_beta_feature_recovers_true_beta_and_share_classes_count_once():
+    rng = np.random.default_rng(5)
+    idx = pd.bdate_range(end="2026-09-23", periods=1200)
+    mkt = rng.normal(0.0003, 0.01, len(idx))
+    market = pd.Series(100 * np.exp(np.cumsum(mkt)), index=idx)
+    prices = {}
+    for name, beta in (("LOW", 0.5), ("HIGH", 1.8)):
+        close = 50 * np.exp(np.cumsum(beta * mkt + rng.normal(0, 0.012, len(idx))))
+        prices[name] = pd.DataFrame({"Open": close, "High": close, "Low": close, "Close": close,
+                                     "Volume": np.full(len(idx), 1e6)}, index=idx)
+    assert abs(feature_frame(prices["LOW"], market)["beta_1y"].iloc[-1] - 0.5) < 0.15
+    assert abs(feature_frame(prices["HIGH"], market)["beta_1y"].iloc[-1] - 1.8) < 0.15
+
+    prices["GOOGL"], prices["GOOG"] = prices["LOW"], prices["LOW"] * 1.001
+    data = build_dataset(prices, market, horizon=20)
+    assert "GOOG" not in set(data["ticker"]) and "GOOGL" in set(data["ticker"])

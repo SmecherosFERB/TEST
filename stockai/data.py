@@ -20,6 +20,7 @@ import pandas as pd
 
 from .cache import DiskCache
 from .errors import DataError
+from .quality import drop_partial_bar
 
 log = logging.getLogger(__name__)
 
@@ -96,6 +97,8 @@ class MarketData:
                 log.warning("%s; încerc Yahoo Finance", exc)
         if frame is None:
             frame = self._yahoo_prices(ticker, period)
+        # Doar bare închise: în timpul ședinței, bara de azi are preț și volum parțiale.
+        frame = drop_partial_bar(frame)
         self.cache.set_frame(key, frame)
         return frame
 

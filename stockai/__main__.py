@@ -71,6 +71,16 @@ def render(rec: Recommendation) -> str:
             f" randament mediu {o.avg_return:+.1%}"
         )
     x = rec.extras
+    if x.get("quality"):
+        q = x["quality"]
+        adv = q["avg_daily_dollar_volume"]
+        liquidity = f"{adv / 1e9:.1f} mld. $" if adv >= 1e9 else f"{adv / 1e6:.0f} mil. $"
+        line = f"Calitatea datelor: {q['grade']} ({q['score']}/100) · {liquidity} tranzacționați pe zi"
+        if not q["tradable"]:
+            line += " · nu trece filtrele de selecție (date slabe, vechi sau lichiditate mică)"
+        lines.append(line)
+        for failed in q["failed_checks"]:
+            lines.append(f"  problemă: {failed}")
     if x.get("market"):
         lines.append(f"Piața (S&P 500): {x['market']['label']}, {x['market']['return_1m']:+.1%} în ultima lună")
     if x.get("macro"):
@@ -127,6 +137,10 @@ def train(tickers: list[str], settings: Settings, with_earnings: bool, target: s
             if q:
                 earnings[t] = q
     data = build_dataset(prices, market["Close"], earnings, horizon=settings.horizon_days, target=target)
+    for ticker, why in data.attrs.get("excluded", {}).items():
+        print(f"  exclus din model: {ticker} ({why})", file=sys.stderr)
+    if data.attrs.get("days_dropped_near_splits"):
+        print(f"  zile scoase în jurul unor split-uri neajustate: {data.attrs['days_dropped_near_splits']}", file=sys.stderr)
     report = walk_forward(data, horizon=settings.horizon_days, target=target)
     print(report.render())
     model = ProbabilityModel(settings.horizon_days, target).fit(data)
