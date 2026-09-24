@@ -164,3 +164,49 @@ def test_market_data_without_keys_returns_none_for_optional_sources(tmp_path):
     md = MarketData(cache=DiskCache(tmp_path))
     assert md.earnings("AAPL") is None
     assert md.insiders("AAPL") is None
+
+
+def test_twelve_data_statistics_earnings_insiders():
+    from stockai.scoring import fundamental_score
+    from stockai.sources.twelvedata import parse_earnings as td_earnings
+    from stockai.sources.twelvedata import parse_insiders as td_insiders
+    from stockai.sources.twelvedata import parse_statistics
+
+    # Forme observate prin conectorul Twelve Data (API-ul REST întoarce același JSON).
+    stats = parse_statistics({
+        "meta": {"symbol": "AAPL", "name": "Apple Inc."},
+        "statistics": {
+            "valuations_metrics": {"market_capitalization": 4.9e12, "trailing_pe": 38.9, "forward_pe": 35.4},
+            "financials": {"profit_margin": 0.276, "income_statement": {"quarterly_revenue_growth": 0.164,
+                                                                        "quarterly_earnings_growth_yoy": 0.271},
+                           "balance_sheet": {"total_debt_to_equity_mrq": 78.4}},
+            "stock_statistics": {"short_ratio": 2.97, "short_percent_of_shares_outstanding": 0.0096},
+            "stock_price_summary": {"fifty_two_week_low": 243.4, "fifty_two_week_high": 345.3},
+        },
+    })
+    assert stats["shortName"] == "Apple Inc." and stats["debtToEquity"] == 78.4 and stats["shortPercent"] == 0.0096
+    assert fundamental_score(stats) > 0
+    assert fundamental_score({**stats, "shortPercent": 0.15}) < fundamental_score(stats)
+
+    quarters = td_earnings({"earnings": [
+        {"date": "2099-10-29", "time": "After Hours", "eps_estimate": 2.1, "eps_actual": None, "surprise_prc": None},
+        {"date": "2026-04-30", "time": "After Hours", "eps_estimate": 1.94, "eps_actual": 2.01, "surprise_prc": 3.61},
+        {"date": "2026-07-30", "time": "After Hours", "eps_estimate": 1.89, "eps_actual": 2.02, "surprise_prc": 6.88},
+    ]})
+    assert [q["reported"] for q in quarters] == [date(2026, 7, 30), date(2026, 4, 30)]
+    assert quarters[0]["surprise_pct"] == 6.88
+
+    trades = td_insiders({"insider_transactions": [
+        {"full_name": "NEWSTEAD JENNIFER", "position": "Officer", "date_reported": "2026-09-15", "shares": 1438,
+         "value": 474813, "description": "Sale at price 330.19 per share."},
+        {"full_name": "NEWSTEAD JENNIFER", "position": "Officer", "date_reported": "2026-09-15", "shares": 30104,
+         "value": None, "description": ""},
+        {"full_name": "DOE JANE", "position": "Director", "date_reported": "2026-09-10", "shares": 1000,
+         "value": 150000, "description": "Purchase at price 150.00 per share."},
+        {"full_name": "X", "position": "Director", "date_reported": "2026-09-01", "shares": 50,
+         "value": 7000, "description": "Stock Gift at price 140.00 per share."},
+        {"full_name": "Y", "position": "Officer", "date_reported": "2026-08-01", "shares": 200,
+         "value": 60000, "description": "Sale at price 290.00 - 310.00 per share."},
+    ]})
+    assert [(t["owner"], t["code"], t["price"]) for t in trades] == [
+        ("NEWSTEAD JENNIFER", "S", 330.19), ("DOE JANE", "P", 150.0), ("Y", "S", 290.0)]

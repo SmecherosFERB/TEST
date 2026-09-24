@@ -67,9 +67,9 @@ Toate sursele sunt gratuite și opționale. Fără o cheie, componenta respectiv
 | Variabilă | Sursă | Ce adaugă | Limită gratuită |
 |---|---|---|---|
 | `ANTHROPIC_API_KEY` | Claude | a doua opinie la semnalele neclare | plătit per utilizare |
-| `TWELVE_DATA_API_KEY` | [Twelve Data](https://twelvedata.com) | prețuri zilnice, ~20 de ani (în loc de Yahoo, care se blochează des) | 800 cereri/zi |
+| `TWELVE_DATA_API_KEY` | [Twelve Data](https://twelvedata.com) | prețuri zilnice pe ~20 de ani, fundamentale (inclusiv datorii și short interest), rezultate trimestriale, insideri | 800 cereri/zi |
 | `ALPHA_VANTAGE_API_KEY` | [Alpha Vantage](https://www.alphavantage.co/support/#api-key) | știri cu sentiment, rezultate trimestriale, insideri | 25 cereri/zi |
-| `SEC_USER_AGENT` | [SEC EDGAR](https://www.sec.gov/search-filings/edgar-search-assistance/accessing-edgar-data) | tranzacțiile oficiale ale insiderilor (formularele 4) | fără cheie; trebuie doar nume + email |
+| `SEC_USER_AGENT` | [SEC EDGAR](https://www.sec.gov/search-filings/edgar-search-assistance/accessing-edgar-data) | tranzacțiile oficiale ale insiderilor (formularele 4) | SEC nu emite chei API: pui doar un nume și un email |
 | `FRED_API_KEY` | [FRED](https://fred.stlouisfed.org/docs/api/api_key.html) | macro: VIX, curba randamentelor, prima de risc | opțional; merge și fără cheie |
 | `CLAUDE_MODEL`, `CLAUDE_EFFORT` | — | modelul Claude (implicit `claude-opus-5`) și cât „gândește” | — |
 
@@ -106,19 +106,21 @@ Insideri (180 zile): 0 cumpărări de la 0 persoane ($0), 12 vânzări de la 3 p
 
 ## Versiunea web (`web/stockai.html`)
 
-Aceeași logică, rescrisă în JavaScript, publicată ca pagină claude.ai. Datele vin prin conectorul Alpha Vantage
-al celui care deschide pagina, iar a doua opinie vine de la Claude, din contul acelei persoane.
+Aceeași logică, rescrisă în JavaScript, publicată ca pagină claude.ai. Datele vin prin conectorii Twelve Data
+(principal) și Alpha Vantage (știri și rezervă) ai celui care deschide pagina, iar a doua opinie vine de la Claude,
+din contul acelei persoane.
 
 - **„Șanse mari acum”**: clasamentul acțiunilor scanate (o cerere pe acțiune), plus trendul S&P 500;
 - **~115 acțiuni importante cu numele lor** în baza de date a paginii (căutare după nume sau simbol);
   lista e în `stockai/universe.json`, iar acțiunile noi analizate se adaugă singure;
 - analiza completă include rezultatele trimestriale și insiderii (păstrate 7 zile în baza de date) și trendul pieței
   (o dată pe zi);
-- folosește **bare săptămânale**, pentru că planul gratuit Alpha Vantage nu oferă istoric zilnic complet. Cu conectorul
-  Twelve Data, pagina poate trece pe date zilnice.
+- folosește **prețuri zilnice din Twelve Data** (medii pe 50 și 200 de zile, statistică pe 10 ani); dacă Twelve Data
+  nu răspunde, trece automat pe bare săptămânale din Alpha Vantage.
 
-Costul în cereri Alpha Vantage: scanare 1 pe acțiune; prima analiză completă a unei acțiuni cel mult 6
-(prețuri, fundamentale, știri, rezultate, insideri, piață), apoi mai puțin, datorită cache-ului.
+Costul în cereri: scanarea, 1 cerere Twelve Data pe acțiune (planul gratuit are 800 pe zi, dar maximum 8 pe minut,
+deci ~8 secunde pe acțiune). Prima analiză completă a unei acțiuni: 4 cereri Twelve Data (prețuri, fundamentale,
+rezultate, insideri) și 1 Alpha Vantage (știri). Datorită cache-ului, analizele următoare costă mai puțin.
 
 ## Limitări (de citit)
 
@@ -156,7 +158,6 @@ python -m pytest
 
 ## Ce urmează
 
-- [ ] Pagina pe date zilnice prin conectorul Twelve Data
 - [ ] Backtest de portofoliu: randament, pierdere maximă, comparat cu S&P 500
 - [ ] Short interest (FINRA) în model
 - [ ] Grafice cu lumânări (TradingView Lightweight Charts)

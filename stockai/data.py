@@ -1,9 +1,10 @@
 """Surse de date. Toate sunt gratuite; fiecare sursă fără cheie sau fără răspuns e pur și simplu omisă.
 
 - prețuri zilnice: Twelve Data (dacă ai TWELVE_DATA_API_KEY), altfel Yahoo Finance (neoficial);
-- fundamentale: Yahoo Finance;
-- știri cu sentiment, rezultate trimestriale: Alpha Vantage (ALPHA_VANTAGE_API_KEY);
-- tranzacțiile insiderilor: SEC EDGAR (SEC_USER_AGENT), altfel Alpha Vantage;
+- fundamentale: Twelve Data, altfel Yahoo Finance;
+- știri cu sentiment: Alpha Vantage (ALPHA_VANTAGE_API_KEY);
+- rezultate trimestriale: Twelve Data, altfel Alpha Vantage;
+- tranzacțiile insiderilor: SEC EDGAR (SEC_USER_AGENT), altfel Twelve Data, altfel Alpha Vantage;
 - context macro: FRED (FRED_API_KEY opțional);
 - trendul pieței: indicele S&P 500 prin ETF-ul SPY.
 """
@@ -119,6 +120,18 @@ class MarketData:
 
     # ---- companie ----
     def fundamentals(self, ticker: str) -> dict[str, Any]:
+        if self.td:
+            key = f"statistics_{ticker}"
+            cached = self.cache.get_json(key, max_age_hours=24)
+            if cached:
+                return cached
+            try:
+                stats = self.td.statistics(ticker)
+                if stats:
+                    self.cache.set_json(key, stats)
+                    return stats
+            except DataError as exc:
+                log.warning("%s; încerc Yahoo Finance", exc)
         import yfinance as yf
 
         try:
@@ -139,18 +152,21 @@ class MarketData:
         return self._yahoo_headlines(ticker)
 
     def earnings(self, ticker: str) -> list[dict[str, Any]] | None:
-        if not self.av:
-            return None
         key = f"earnings_{ticker}"
         cached = self.cache.get_json(key, max_age_hours=24 * 3)
         if cached is not None:
             return _restore_dates(cached, "reported")
-        try:
-            quarters = self.av.earnings(ticker)
-        except DataError as exc:
-            log.warning("%s", exc)
-            return None
-        self.cache.set_json(key, quarters)
+        quarters = None
+        for source in (self.td, self.av):
+            if source is None:
+                continue
+            try:
+                quarters = source.earnings(ticker)
+                break
+            except DataError as exc:
+                log.warning("%s", exc)
+        if quarters is not None:
+            self.cache.set_json(key, quarters)
         return quarters
 
     def insiders(self, ticker: str, close: pd.Series | None = None) -> list[dict[str, Any]] | None:
@@ -163,6 +179,11 @@ class MarketData:
         if self.sec:
             try:
                 trades = [t for t in self.sec.insider_trades(ticker) if t["code"] in ("P", "S")]
+            except DataError as exc:
+                log.warning("%s", exc)
+        if trades is None and self.td:
+            try:
+                trades = self.td.insiders(ticker)
             except DataError as exc:
                 log.warning("%s", exc)
         if trades is None and self.av and close is not None:

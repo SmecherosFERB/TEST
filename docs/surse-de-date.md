@@ -17,7 +17,7 @@ furnizorului înainte să plătești ceva.
 
 | Sursă | Programul Python | Pagina claude.ai |
 |---|---|---|
-| Twelve Data (prețuri zilnice) | da, cu `TWELVE_DATA_API_KEY` | după ce termini conectarea conectorului |
+| Twelve Data: prețuri zilnice, fundamentale, rezultate, insideri | da, cu `TWELVE_DATA_API_KEY` | da (sursa principală) |
 | Alpha Vantage: știri, rezultate trimestriale, insideri | da | da |
 | SEC EDGAR: insideri (formularele 4) | da, cu `SEC_USER_AGENT` | nu (fără conector) |
 | FRED: VIX, curba randamentelor, prima de risc | da | nu (fără conector) |

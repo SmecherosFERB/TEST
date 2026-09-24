@@ -512,7 +512,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       <div class="grid">
         <div class="col">
           <section class="panel">
-            <h2 class="panel-title">Preț săptămânal, ultimii 2 ani</h2>
+            <h2 class="panel-title" id="chartTitle">Preț, ultimii 2 ani</h2>
             <div class="legend" id="legend"></div>
             <div class="chart-wrap" id="chartWrap"></div>
             <details class="data">
@@ -521,7 +521,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
             </details>
           </section>
           <section class="panel">
-            <h2 class="panel-title">Indicatori tehnici (săptămânali)</h2>
+            <h2 class="panel-title" id="indTitle">Indicatori tehnici</h2>
             <div class="table-scroll" id="indicators"></div>
           </section>
           <section class="panel">
@@ -574,7 +574,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
 
   <footer>
     <p>Unealtă de analiză, nu sfat financiar. Procentele descriu trecutul acțiunii și nu garantează nimic.</p>
-    <p>Metodă: bare săptămânale (planul gratuit Alpha Vantage nu oferă istoric zilnic complet), orizont de 4 săptămâni, statistică pe ultimii 10 ani. Clasamentul folosește doar partea tehnică; analiza completă adaugă fundamentale, știri, rezultate trimestriale, insideri, trendul pieței și, la semnale neclare, opinia lui Claude. Săptămânile similare se suprapun, deci n supraestimează cazurile independente.</p>
+    <p>Metodă: prețuri zilnice din Twelve Data (dacă nu răspunde, bare săptămânale din Alpha Vantage), orizont de 20 de zile de tranzacționare (~4 săptămâni), statistică pe ultimii 10 ani. Clasamentul folosește doar partea tehnică; analiza completă adaugă fundamentale, știri, rezultate trimestriale, insideri, trendul pieței și, la semnale neclare, opinia lui Claude. Săptămânile similare se suprapun, deci n supraestimează cazurile independente.</p>
   </footer>
 </div>
 
@@ -583,9 +583,19 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
   "use strict";
 
   const AV = "Alpha Vantage MCP Server";
+  const TD = "Twelve Data";
+  // Două feluri de date: zilnice (Twelve Data, sursa principală) și săptămânale (Alpha Vantage, rezervă).
+  // Orizontul e același în ambele cazuri: ~4 săptămâni (20 de zile de tranzacționare).
+  const FREQ = {
+    D: { key: "D", fast: 50, slow: 200, horizon: 20, calib: 2520, minBars: 260, chg: [21, 63, 126, 252], sparkStep: 5,
+         chartBars: 504, unit: "zile", fastName: "Medie 50 zile", slowName: "Medie 200 zile", fastShort: "M50", slowShort: "M200",
+         rsiName: "RSI (14 zile)", volName: "Volum față de media 20 zile", title: "Preț zilnic, ultimii 2 ani", tip: "", source: "date zilnice · Twelve Data" },
+    W: { key: "W", fast: 10, slow: 40, horizon: 4, calib: 520, minBars: 60, chg: [4, 13, 26, 52], sparkStep: 1,
+         chartBars: 104, unit: "săptămâni", fastName: "Medie 10 săpt.", slowName: "Medie 40 săpt.", fastShort: "M10", slowShort: "M40",
+         rsiName: "RSI (14 săpt.)", volName: "Volum față de media 20 săpt.", title: "Preț săptămânal, ultimii 2 ani", tip: "săpt. ", source: "date săptămânale · Alpha Vantage" },
+  };
+  const freqOf = (x) => FREQ[(x && x.freq) || "W"];
   const CFG = {
-    horizon: 4,
-    calibWeeks: 520,
     bucket: 15,
     minSamples: 30,
     minEdge: 0.03,
@@ -662,6 +672,8 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
   const K = {
     data: (t) => `stockai:v1:data:${t}`,
     weekly: (t) => `stockai:v2:w:${t}`,
+    bars: (t) => `stockai:v3:b:${t}`,
+    tdCalls: "stockai:v3:tdcalls",
     lru: "stockai:v2:lru",
     recent: "stockai:v1:recent",
     calls: "stockai:v1:calls",
@@ -671,7 +683,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
   function cachePut(key, value) {
     let lru = (store.get(K.lru) || []).filter((k) => k !== key);
     lru.unshift(key);
-    while (lru.length > 16) store.del(lru.pop());
+    while (lru.length > 12) store.del(lru.pop());
     if (!store.set(key, value)) {
       while (lru.length > 1) store.del(lru.pop());
       store.set(key, value);
@@ -699,19 +711,141 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     paceChain = p;
     return p;
   }
-  function callsToday() {
-    const c = store.get(K.calls);
+  function callsToday(key = K.calls) {
+    const c = store.get(key);
     return c && c.day === today() ? c.n : 0;
   }
-  function countCall() {
-    store.set(K.calls, { day: today(), n: callsToday() + 1 });
+  function countCall(key = K.calls) {
+    store.set(key, { day: today(), n: callsToday(key) + 1 });
     renderQuota();
   }
   function renderQuota() {
-    const n = callsToday();
-    $("quota").textContent = n
-      ? `Cereri Alpha Vantage azi (din acest browser): ${n} din 25`
-      : "Alpha Vantage gratuit: 25 de cereri pe zi";
+    $("quota").textContent = `Cereri azi (din acest browser): Twelve Data ${callsToday(K.tdCalls)} din 800 · Alpha Vantage ${callsToday()} din 25`;
+  }
+
+  // ---------- Twelve Data (sursa principală): plan gratuit 800 cereri/zi, 8 pe minut ----------
+  let tdChain = Promise.resolve();
+  let tdLastAt = 0;
+  let tdOff = false;
+  function tdPace() {
+    const p = tdChain.then(async () => {
+      const wait = tdLastAt + 7600 - Date.now();
+      if (wait > 0) await sleep(wait);
+      tdLastAt = Date.now();
+    });
+    tdChain = p;
+    return p;
+  }
+
+  // Răspunsul vine ca {result: "..."}: text CSV cu „;” sau text JSON.
+  function tdResult(p) {
+    const r = p && typeof p === "object" && "result" in p ? p.result : p;
+    if (r && typeof r === "object") return r;
+    const text = String(r == null ? "" : r).trim();
+    if (!text) throw new AvError("no_data", "Twelve Data: răspuns gol");
+    if (/^error/i.test(text)) throw tdError(text);
+    if (text.startsWith("{") || text.startsWith("[")) {
+      let obj;
+      try { obj = JSON.parse(text); } catch { throw new AvError("td_other", "Twelve Data: răspuns neînțeles"); }
+      if (obj && (obj.status === "error" || (fin(obj.code) && obj.code >= 400))) throw tdError(String(obj.message || obj.code));
+      return obj;
+    }
+    const lines = text.split(/\r?\n/).filter(Boolean);
+    const head = lines.shift().split(";");
+    return lines.map((line) => { const cells = line.split(";"); return Object.fromEntries(head.map((h, k) => [h, cells[k]])); });
+  }
+  function tdError(msg) {
+    if (/credit|limit|too many|429/i.test(msg)) return new AvError("td_quota", msg);
+    if (/not found|invalid|symbol|not available|no data|404/i.test(msg)) return new AvError("no_data", msg);
+    return new AvError("td_other", msg);
+  }
+
+  async function tdCall(mcp, tool, input) {
+    if (tdOff) throw new AvError("td_off", "Twelve Data indisponibil");
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await tdPace();
+      let res;
+      try {
+        res = await mcp.callTool(TD, tool, input, { cache: { staleTime: 300000, gcTime: 3600000, refresh: attempt > 0 } });
+      } catch (err) {
+        const code = (err && err.code) || "upstream_error";
+        if (err && err.retryable && attempt === 0) { await sleep((err.retryAfterMs || 2000) + Math.random() * 800); continue; }
+        if (["server_not_connected", "needs_reauth", "not_in_manifest", "blocked_by_policy", "approval_required", "selection_required"].includes(code)) tdOff = true;
+        throw new AvError(code === "tool_error" ? "td_other" : code, (err && err.message) || code);
+      }
+      if (!res.cache) countCall(K.tdCalls);
+      try {
+        return tdResult(res.payload);
+      } catch (e) {
+        if (typeof mcp.invalidate === "function") mcp.invalidate(TD, tool, input).catch(() => {});
+        // Limita pe minut: o singură reîncercare, după ce trece minutul.
+        if (e.kind === "td_quota" && attempt === 0) { await sleep(61000); continue; }
+        throw e;
+      }
+    }
+    throw new AvError("td_quota", "Limita Twelve Data");
+  }
+
+  function parseTdSeries(rows) {
+    const bars = (Array.isArray(rows) ? rows : [])
+      .map((r) => ({ d: String(r.datetime || "").slice(0, 10), c: num(r.close), v: num(r.volume) ?? 0 }))
+      .filter((r) => fin(r.c) && /^\d{4}-\d{2}-\d{2}$/.test(r.d))
+      .sort((a, b) => (a.d < b.d ? -1 : 1));
+    if (!bars.length) throw new AvError("no_data", "Fără prețuri");
+    return bars;
+  }
+
+  function parseTdStatistics(obj) {
+    const st = obj && obj.statistics;
+    if (!st) return null;
+    const val = st.valuations_metrics || {}, fin_ = st.financials || {}, inc = fin_.income_statement || {},
+      bal = fin_.balance_sheet || {}, stock = st.stock_statistics || {}, px = st.stock_price_summary || {}, meta = obj.meta || {};
+    return {
+      name: typeof meta.name === "string" ? meta.name : null,
+      exchange: typeof meta.exchange === "string" ? meta.exchange : null,
+      currency: typeof meta.currency === "string" ? meta.currency : null,
+      sector: null,
+      trailingPE: num(val.trailing_pe),
+      forwardPE: num(val.forward_pe),
+      revenueGrowth: num(inc.quarterly_revenue_growth),
+      earningsGrowth: num(inc.quarterly_earnings_growth_yoy),
+      profitMargin: num(fin_.profit_margin),
+      debtToEquity: num(bal.total_debt_to_equity_mrq),
+      shortPct: num(stock.short_percent_of_shares_outstanding),
+      shortRatio: num(stock.short_ratio),
+      recommendationMean: null,
+      analystCount: 0,
+      targetPrice: null,
+      beta: num(px.beta),
+      marketCap: num(val.market_capitalization),
+    };
+  }
+
+  function parseTdEarnings(rows) {
+    return (Array.isArray(rows) ? rows : [])
+      .map((q) => ({ reported: String(q.date || "").slice(0, 10), eps: num(q.eps_actual), estimate: num(q.eps_estimate), surprise_pct: num(q.surprise_prc) }))
+      .filter((q) => /^\d{4}-\d{2}-\d{2}$/.test(q.reported) && fin(q.eps) && q.reported <= today())
+      .sort((a, b) => (a.reported < b.reported ? 1 : -1)).slice(0, 8);
+  }
+
+  // Twelve Data descrie fiecare tranzacție („Sale at price…”, „Purchase at price…”, acordări fără descriere).
+  function parseTdInsiders(obj) {
+    const rows = obj && Array.isArray(obj.insider_transactions) ? obj.insider_transactions : [];
+    const since = isoDaysAgo(365);
+    const out = [];
+    for (const t of rows) {
+      const date = String(t.date_reported || "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < since) continue;
+      const desc = String(t.description || "");
+      const code = /^\s*(purchase|buy)/i.test(desc) ? "P" : /^\s*(sale|sell)/i.test(desc) ? "S" : null;
+      if (!code) continue;
+      const shares = num(t.shares) || 0;
+      const m = /price\s+([\d.,]+)/i.exec(desc);
+      const price = m ? num(m[1].replace(/,/g, "")) : (fin(num(t.value)) && shares ? num(t.value) / shares : null);
+      if (!fin(price)) continue;
+      out.push({ date, owner: String(t.full_name || ""), title: String(t.position || ""), code, shares, price });
+    }
+    return out.slice(0, 200);
   }
 
   function avPayloadError(p) {
@@ -773,6 +907,27 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     const weeks = parseWeekly(await avCall(mcp, "TIME_SERIES_WEEKLY", { symbol: t, datatype: "json", return_full_data: true }));
     cachePut(K.weekly(t), { day: today(), weeks });
     return weeks;
+  }
+
+  // Prețuri: zilnic din Twelve Data; dacă nu merge, săptămânal din Alpha Vantage.
+  async function getBars(mcp, t) {
+    const hit = store.get(K.bars(t));
+    if (hit && hit.day === today() && Array.isArray(hit.bars) && hit.bars.length) return hit;
+    let out = null, tdErr = null;
+    if (!tdOff) {
+      try {
+        out = { freq: "D", bars: parseTdSeries(await tdCall(mcp, "get_time_series", { symbol: t, interval: "1day", outputsize: 3000 })) };
+      } catch (e) { tdErr = e; }
+    }
+    if (!out) {
+      try {
+        out = { freq: "W", bars: await getWeekly(mcp, t) };
+      } catch (e) {
+        throw tdErr && tdErr.kind === "no_data" ? tdErr : e;
+      }
+    }
+    cachePut(K.bars(t), { day: today(), ...out });
+    return out;
   }
 
   function parseOverview(p) {
@@ -900,14 +1055,14 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     };
   }
 
-  // Trendul pieței din S&P 500 (SPY), pe săptămâni: 40 de săptămâni ≈ 200 de zile, 10 ≈ 50.
-  function marketFromWeeks(weeks) {
-    if (!weeks || weeks.length < 45) return null;
+  // Trendul pieței din S&P 500 (SPY): prețul față de media lungă și media scurtă față de cea lungă.
+  function marketFromBars(weeks, f) {
+    if (!weeks || weeks.length < f.slow + 5) return null;
     const c = weeks.map((w) => w.c);
-    const s10 = sma(c, 10), s40 = sma(c, 40), i = c.length - 1;
+    const s10 = sma(c, f.fast), s40 = sma(c, f.slow), i = c.length - 1;
     if (!fin(s40[i])) return null;
     const regime = 0.5 * Math.sign(c[i] - s40[i]) + 0.5 * Math.sign(s10[i] - s40[i]);
-    const ret4w = c[i] / c[i - 4] - 1;
+    const ret4w = c[i] / c[i - f.horizon] - 1;
     return {
       score: 100 * clip(0.8 * regime + 0.2 * Math.sign(ret4w)),
       label: regime > 0.5 ? "în creștere" : regime < -0.5 ? "în scădere" : "fără direcție clară",
@@ -966,9 +1121,9 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     return out;
   }
 
-  function indicators(weeks) {
+  function indicators(weeks, f) {
     const c = weeks.map((w) => w.c), v = weeks.map((w) => w.v);
-    const sma10 = sma(c, 10), sma40 = sma(c, 40), mid = sma(c, 20), sd = rollingStd(c, 20);
+    const sma10 = sma(c, f.fast), sma40 = sma(c, f.slow), mid = sma(c, 20), sd = rollingStd(c, 20);
     const e12 = ema(c, 12), e26 = ema(c, 26);
     const macd = c.map((_, i) => e12[i] - e26[i]);
     const sig = ema(macd, 9);
@@ -1002,6 +1157,9 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     if (fin(f.revenueGrowth)) s.push(clip(f.revenueGrowth / 0.15));
     if (fin(f.profitMargin)) s.push(clip(f.profitMargin / 0.15));
     if (fin(f.recommendationMean)) s.push(clip((3 - f.recommendationMean) / 2));
+    // Datorii mici față de capital = sănătos; multe acțiuni vândute în lipsă = mulți investitori pariază pe scădere.
+    if (fin(f.debtToEquity)) s.push(clip((125 - f.debtToEquity) / 75));
+    if (fin(f.shortPct) && f.shortPct >= 0.05) s.push(f.shortPct >= 0.10 ? -1 : -0.5);
     return s.length ? (100 * s.reduce((a, b) => a + b, 0)) / s.length : null;
   }
 
@@ -1021,9 +1179,9 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
   }
   const decide = (s) => (s >= CFG.threshold ? "BUY" : s <= -CFG.threshold ? "SELL" : "HOLD");
 
-  function historicalOdds(c, score, current) {
-    const h = CFG.horizon, last = c.length - 1 - h;
-    const start = Math.max(0, last - CFG.calibWeeks + 1);
+  function historicalOdds(c, score, current, f) {
+    const h = f.horizon, last = c.length - 1 - h;
+    const start = Math.max(0, last - f.calib + 1);
     let n = 0, up = 0, all = 0, allUp = 0, sumRet = 0;
     for (let i = start; i <= last; i++) {
       if (!fin(score[i])) continue;
@@ -1055,21 +1213,21 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     return out;
   }
 
-  function technical(weeks) {
-    if (weeks.length < 60) throw new AvError("short_history", "istoric prea scurt");
-    const ind = indicators(weeks);
+  function technical(weeks, f) {
+    if (weeks.length < f.minBars) throw new AvError("short_history", "istoric prea scurt");
+    const ind = indicators(weeks, f);
     const i = weeks.length - 1;
     if (!fin(ind.score[i])) throw new AvError("short_history", "istoric prea scurt");
-    return { ind, i, odds: historicalOdds(ind.c, ind.score, ind.score[i]) };
+    return { ind, i, f, odds: historicalOdds(ind.c, ind.score, ind.score[i], f) };
   }
 
   function analyze(entry) {
-    const { ind, i, odds } = technical(entry.weeks);
+    const { ind, i, odds, f } = technical(entry.weeks, freqOf(entry));
     const asOf = entry.weeks[i].d;
     const ev = entry.events || {};
     const events = {
       earnings: earningsSignal(ev.earnings, asOf),
-      insiders: Array.isArray(ev.insiders) ? insiderSignal(classifyInsiders(ev.insiders, entry.weeks), asOf) : null,
+      insiders: Array.isArray(ev.insiders) ? insiderSignal(ev.insidersCoded ? ev.insiders : classifyInsiders(ev.insiders, entry.weeks), asOf) : null,
       market: entry.market || null,
     };
     const scores = {
@@ -1082,7 +1240,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     };
     scores.composite = compositeScore(scores);
     const rule = decide(scores.composite);
-    return { ind, i, scores, rule, odds, events, reasons: findAmbiguity(scores, rule, odds) };
+    return { ind, i, f, scores, rule, odds, events, reasons: findAmbiguity(scores, rule, odds) };
   }
 
   // ---------- shared database: stock list + scan results ----------
@@ -1111,7 +1269,8 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
   async function ensureMarket(mcp) {
     if (marketDoc && marketDoc.day === today()) return marketDoc;
     try {
-      const m = marketFromWeeks(await getWeekly(mcp, "SPY"));
+      const spy = await getBars(mcp, "SPY");
+      const m = marketFromBars(spy.bars, FREQ[spy.freq]);
       if (m) {
         marketDoc = { ...m, day: today() };
         renderMarketLine();
@@ -1132,42 +1291,47 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
         if (v && daysAgo(v.fetchedAt) < 7) return { ...v };
       } catch { /* citim din nou de la sursă */ }
     }
-    const out = { ticker: t, fetchedAt: new Date().toISOString(), earnings: null, insiders: null };
-    let earningsError = null, insidersError = null, quota = false;
+    const out = { ticker: t, fetchedAt: new Date().toISOString(), earnings: null, insiders: null, insidersCoded: false };
+    let earningsError = null, insidersError = null;
+    // Întâi Twelve Data (mai multe cereri gratuite, insideri clasificați exact), apoi Alpha Vantage.
     try {
-      out.earnings = parseEarnings(await avCall(mcp, "EARNINGS", { symbol: t }));
+      out.earnings = parseTdEarnings(await tdCall(mcp, "get_earnings", { symbol: t }));
     } catch (e) {
-      earningsError = sectionError(e);
-      quota = e && e.kind === "av_quota";
+      try { out.earnings = parseEarnings(await avCall(mcp, "EARNINGS", { symbol: t })); } catch (e2) { earningsError = sectionError(e2); }
     }
-    if (quota) insidersError = earningsError;
-    else {
+    try {
+      out.insiders = parseTdInsiders(await tdCall(mcp, "get_regulatory_data", { symbol: t, data_type: "insider_transactions" }));
+      out.insidersCoded = true;
+    } catch (e) {
       try {
         out.insiders = parseInsiders(await avCall(mcp, "INSIDER_TRANSACTIONS", { symbol: t, from_date: isoDaysAgo(365) }));
-      } catch (e) {
-        insidersError = sectionError(e);
+      } catch (e2) {
+        insidersError = sectionError(e2);
       }
     }
     if (!earningsError && !insidersError) dbWrite(`events/${t}`, out);
     return { ...out, earningsError, insidersError };
   }
 
-  function scanRecord(t, weeks) {
-    const { ind, i, odds } = technical(weeks);
+  function scanRecord(t, weeks, f) {
+    const { ind, i, odds } = technical(weeks, f);
+    const spark = [];
+    for (let k = 25; k >= 0; k--) if (i - k * f.sparkStep >= 0) spark.push(r2(ind.c[i - k * f.sparkStep]));
     return {
       ticker: t,
+      freq: f.key,
       week: weeks[i].d,
       scannedAt: new Date().toISOString(),
       price: r2(ind.c[i]),
-      chg4w: r4(change(ind.c, i, 4)),
-      chg26w: r4(change(ind.c, i, 26)),
+      chg4w: r4(change(ind.c, i, f.horizon)),
+      chg26w: r4(change(ind.c, i, f.chg[2])),
       tech: r1(ind.score[i]),
       rule: decide(ind.score[i]),
       prob: odds ? r4(odds.prob) : null,
       base: odds ? r4(odds.base) : null,
       avgRet: odds ? r4(odds.avgRet) : null,
       n: odds ? odds.n : 0,
-      spark: ind.c.slice(-26).map(r2),
+      spark,
     };
   }
 
@@ -1182,7 +1346,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
 
   function recordDetail(entry, a) {
     let rec;
-    try { rec = scanRecord(entry.ticker, entry.weeks); } catch { return; }
+    try { rec = scanRecord(entry.ticker, entry.weeks, freqOf(entry)); } catch { return; }
     const fd = finalDecisionFor(entry, a);
     rec.full = {
       week: rec.week,
@@ -1285,11 +1449,11 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       scanJob.current = t;
       renderScanStatus();
       try {
-        const weeks = await getWeekly(mcp, t);
-        await saveScan(t, scanRecord(t, weeks));
+        const b = await getBars(mcp, t);
+        await saveScan(t, scanRecord(t, b.bars, FREQ[b.freq]));
       } catch (e) {
         const kind = (e && e.kind) || "upstream_error";
-        if (FATAL.has(kind)) { stopMsg = AV_COPY(t)[kind] || AV_COPY(t).server_unavailable; break; }
+        if (FATAL.has(kind) || kind === "td_quota") { stopMsg = AV_COPY(t)[kind] || AV_COPY(t).server_unavailable; break; }
         await saveScan(t, { ticker: t, scannedAt: new Date().toISOString(), error: kind });
       }
       scanJob.done++;
@@ -1306,18 +1470,20 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
   function change(c, i, k) { return i - k >= 0 ? c[i] / c[i - k] - 1 : null; }
 
   function claudePrompt(entry, a) {
-    const { ind, i, scores, rule, odds } = a;
+    const { ind, i, scores, rule, odds, f } = a;
     const facts = {
       ticker: entry.ticker,
       company: (entry.overview && entry.overview.name) || (dir.get(entry.ticker) || {}).name || null,
       week_of: entry.weeks[i].d,
       price: r4(ind.c[i]),
-      horizon: `${CFG.horizon} săptămâni (~20 de zile de tranzacționare)`,
-      price_change: { "1m": r4(change(ind.c, i, 4)), "3m": r4(change(ind.c, i, 13)), "6m": r4(change(ind.c, i, 26)), "1y": r4(change(ind.c, i, 52)) },
+      horizon: "20 de zile de tranzacționare (~4 săptămâni)",
+      data_frequency: f.key === "D" ? "zilnic" : "săptămânal",
+      price_change: { "1m": r4(change(ind.c, i, f.chg[0])), "3m": r4(change(ind.c, i, f.chg[1])), "6m": r4(change(ind.c, i, f.chg[2])), "1y": r4(change(ind.c, i, f.chg[3])) },
       weekly_indicators: {
         rsi14: r4(ind.rsi[i]),
-        price_vs_sma10w: r4(ind.c[i] / ind.sma10[i] - 1),
-        price_vs_sma40w: r4(ind.c[i] / ind.sma40[i] - 1),
+        moving_averages: f.key === "D" ? "50 și 200 de zile" : "10 și 40 de săptămâni",
+        price_vs_fast_ma: r4(ind.c[i] / ind.sma10[i] - 1),
+        price_vs_slow_ma: r4(ind.c[i] / ind.sma40[i] - 1),
         macd_histogram: r4(ind.hist[i]),
         bollinger_pct_b: r4(ind.pctB[i]),
         volume_vs_20w_avg: r4(ind.volRatio[i]),
@@ -1462,12 +1628,12 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     const total = dir.size;
     const doneFresh = [...dir.keys()].filter((t) => scans.has(t) && daysAgo(scans.get(t).scannedAt) < CFG.staleDays).length;
     const sel = el("select", { class: "field", id: "scanCount", "aria-label": "Câte acțiuni scanez" },
-      [3, 5, 10, 15].map((n) => el("option", { value: n, text: `${n} acțiuni`, selected: n === 5 })));
+      [5, 10, 25, 50].map((n) => el("option", { value: n, text: `${n} acțiuni`, selected: n === 10 })));
     const prevSel = document.getElementById("scanCount");
     if (prevSel) sel.value = prevSel.value;
     const controls = scanJob
       ? [el("button", { class: "btn ghost small", type: "button", text: "Oprește scanarea", onclick: () => { if (scanJob) scanJob.stop = true; } })]
-      : [sel, el("button", { class: "btn small", type: "button", text: "Scanează", disabled: !dirReady, onclick: () => startScan(Number(sel.value) || 5) })];
+      : [sel, el("button", { class: "btn small", type: "button", text: "Scanează", disabled: !dirReady, onclick: () => startScan(Number(sel.value) || 10) })];
     bar.replaceChildren(el("span", { class: "num", text: `Scanate: ${doneFresh} din ${total}` }), ...controls);
   }
 
@@ -1475,11 +1641,11 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     const box = $("scanStatus");
     if (scanJob) {
       box.replaceChildren(el("span", { class: "spinner", "aria-hidden": "true" }),
-        el("span", { text: `Scanez ${scanJob.current || "…"} (${Math.min(scanJob.done + 1, scanJob.total)} din ${scanJob.total}). O cerere pe acțiune, la 1,3 secunde distanță.` }));
+        el("span", { text: `Scanez ${scanJob.current || "…"} (${Math.min(scanJob.done + 1, scanJob.total)} din ${scanJob.total}). O cerere pe acțiune, la ~8 secunde distanță (limita gratuită Twelve Data).` }));
       box.hidden = false;
     } else if (msg) {
-      const left = Math.max(0, 25 - callsToday());
-      box.replaceChildren(el("span", { text: `${msg} Îți mai rămân cam ${left} cereri Alpha Vantage azi (în acest browser).` }));
+      const left = Math.max(0, 800 - callsToday(K.tdCalls));
+      box.replaceChildren(el("span", { text: `${msg} Îți mai rămân cam ${left} cereri Twelve Data azi (în acest browser).` }));
       box.hidden = false;
     } else {
       box.hidden = true;
@@ -1548,7 +1714,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
 
   // ---------- rendering: detail ----------
   const STEPS = [
-    ["weekly", "Prețuri săptămânale"],
+    ["weekly", "Prețuri"],
     ["overview", "Date fundamentale"],
     ["news", "Știri și sentiment"],
     ["events", "Rezultate și insideri"],
@@ -1582,6 +1748,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     upstream_error: ["Alpha Vantage nu răspunde", "Serviciul nu răspunde acum. Încearcă din nou peste un minut."],
     av_quota: ["Limita gratuită Alpha Vantage e atinsă", "Planul gratuit permite 25 de cereri pe zi și cel mult una pe secundă. Continuă mâine sau folosește o cheie premium."],
     av_premium: ["Date disponibile doar cu abonament", "Alpha Vantage oferă aceste date doar pe planurile premium."],
+    td_quota: ["Limita gratuită Twelve Data e atinsă", "Planul gratuit permite 800 de cereri pe zi și 8 pe minut. Încearcă din nou peste un minut sau mâine."],
     no_data: ["Simbol necunoscut", `Nu am găsit date pentru ${t}. Verifică simbolul sau caută după nume (de exemplu Apple, Microsoft).`],
     short_history: ["Istoric prea scurt", `${t} are prea puțin istoric pentru analiză (e nevoie de cel puțin un an de date săptămânale).`],
     no_mcp: ["Datele live nu sunt disponibile aici", "Pagina citește datele prin conectorul tău Alpha Vantage. Deschide-o din claude.ai, logat în contul tău."],
@@ -1682,8 +1849,8 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     const name = (o && o.name) || nameOf(entry.ticker);
     const nameBlock = el("div", null,
       el("div", { class: "stock-name", text: entry.ticker }),
-      el("div", { class: "stock-sub", text: [name, o && o.exchange].filter(Boolean).join(" · ") || "Acțiune" }),
-      el("div", { class: "stock-price" }, money(last.c), " ", el("small", { text: `${(o && o.currency) || ""} · săptămâna ${fmtDate(last.d)}`.trim() })),
+      el("div", { class: "stock-sub", text: [name, o && o.exchange, a.f.source].filter(Boolean).join(" · ") }),
+      el("div", { class: "stock-price" }, money(last.c), " ", el("small", { text: `${(o && o.currency) || ""} · ${a.f.key === "D" ? "închidere" : "săptămâna"} ${fmtDate(last.d)}`.trim() })),
     );
     const byText = fd.by === "Claude"
       ? `decis de Claude · încredere ${CONF[fd.v.confidence]}`
@@ -1728,13 +1895,15 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
 
   function renderChart(entry, a) {
     const { ind } = a;
-    const n = Math.min(104, entry.weeks.length);
+    const f = a.f;
+    $("chartTitle").textContent = f.title;
+    const n = Math.min(f.chartBars, entry.weeks.length);
     const s = entry.weeks.length - n;
     const dates = entry.weeks.slice(s).map((w) => w.d);
     const series = [
       { key: "price", name: "Preț", color: "var(--s1)", dash: null, vals: ind.c.slice(s) },
-      { key: "sma10", name: "Medie 10 săpt.", color: "var(--s2)", dash: "7 5", vals: ind.sma10.slice(s) },
-      { key: "sma40", name: "Medie 40 săpt.", color: "var(--s3)", dash: "2 5", vals: ind.sma40.slice(s) },
+      { key: "sma10", name: f.fastName, color: "var(--s2)", dash: "7 5", vals: ind.sma10.slice(s) },
+      { key: "sma40", name: f.slowName, color: "var(--s3)", dash: "2 5", vals: ind.sma40.slice(s) },
     ];
     $("legend").replaceChildren(...series.map((se) => el("span", { class: "legend-item" }, swatch(se), se.name)));
 
@@ -1786,7 +1955,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     for (const e of ends) {
       svg.append(sv("line", { x1: W - m.r + 6, x2: W - m.r + 16, y1: e.y, y2: e.y, stroke: e.se.color, "stroke-width": 2, "stroke-dasharray": e.se.dash || "none" }));
       const t = sv("text", { x: W - m.r + 20, y: e.y + 4, class: "end-label" });
-      t.textContent = e.se.key === "price" ? money(e.v) : e.se.key === "sma10" ? "M10" : "M40";
+      t.textContent = e.se.key === "price" ? money(e.v) : e.se.key === "sma10" ? f.fastShort : f.slowShort;
       svg.append(t);
     }
     svg.append(sv("circle", { cx: x(n - 1), cy: y(series[0].vals[n - 1]), r: 4.5, fill: "var(--s1)", stroke: "var(--surface)", "stroke-width": 2 }));
@@ -1808,7 +1977,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
         if (fin(v)) { dots[k].setAttribute("cx", x(cur)); dots[k].setAttribute("cy", y(v)); dots[k].setAttribute("visibility", "visible"); }
         else dots[k].setAttribute("visibility", "hidden");
       });
-      tip.replaceChildren(el("div", { class: "tip-date", text: `săpt. ${fmtDate(dates[cur])}` }),
+      tip.replaceChildren(el("div", { class: "tip-date", text: `${f.tip}${fmtDate(dates[cur])}` }),
         ...series.map((se) => el("div", { class: "tip-row" }, swatch(se), se.name, el("strong", { text: money(se.vals[cur]) }))));
       tip.hidden = false;
       const rect = svg.getBoundingClientRect();
@@ -1847,16 +2016,17 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
   }
 
   function renderIndicators(a) {
+    $("indTitle").textContent = a.f.key === "D" ? "Indicatori tehnici (zilnici)" : "Indicatori tehnici (săptămânali)";
     const { ind, i } = a;
     const rsiV = ind.rsi[i], pb = ind.pctB[i], vr = ind.volRatio[i];
     const rows = [
-      ["RSI (14 săpt.)", fin(rsiV) ? rsiV.toFixed(1) : "n/a", rsiV < 30 ? "supravândut" : rsiV > 70 ? "supracumpărat" : "neutru"],
-      ["Preț față de media 10 săpt.", spct(ind.c[i] / ind.sma10[i] - 1), ind.c[i] > ind.sma10[i] ? "deasupra" : "sub"],
-      ["Preț față de media 40 săpt.", spct(ind.c[i] / ind.sma40[i] - 1), ind.c[i] > ind.sma40[i] ? "trend pe termen lung în sus" : "trend pe termen lung în jos"],
+      [a.f.rsiName, fin(rsiV) ? rsiV.toFixed(1) : "n/a", rsiV < 30 ? "supravândut" : rsiV > 70 ? "supracumpărat" : "neutru"],
+      [`Preț față de ${a.f.fastName.toLowerCase()}`, spct(ind.c[i] / ind.sma10[i] - 1), ind.c[i] > ind.sma10[i] ? "deasupra" : "sub"],
+      [`Preț față de ${a.f.slowName.toLowerCase()}`, spct(ind.c[i] / ind.sma40[i] - 1), ind.c[i] > ind.sma40[i] ? "trend pe termen lung în sus" : "trend pe termen lung în jos"],
       ["MACD, histogramă", fin(ind.hist[i]) ? ind.hist[i].toFixed(2) : "n/a", ind.hist[i] > 0 ? (ind.hist[i] > ind.hist[i - 1] ? "pozitiv, în creștere" : "pozitiv, în scădere") : (ind.hist[i] > ind.hist[i - 1] ? "negativ, se revine" : "negativ, se adâncește")],
       ["Poziție în benzile Bollinger", fin(pb) ? pb.toFixed(2) : "n/a", pb > 1 ? "peste banda de sus" : pb < 0 ? "sub banda de jos" : pb > 0.8 ? "aproape de banda de sus" : pb < 0.2 ? "aproape de banda de jos" : "la mijloc"],
-      ["Volum față de media 20 săpt.", fin(vr) ? `${vr.toFixed(2)}×` : "n/a", vr > 1.5 ? "volum neobișnuit de mare" : "normal"],
-      ["Variație 1 lună / 3 luni / 1 an", [4, 13, 52].map((k) => spct(change(ind.c, i, k), 1)).join(" / "), ""],
+      [a.f.volName, fin(vr) ? `${vr.toFixed(2)}×` : "n/a", vr > 1.5 ? "volum neobișnuit de mare" : "normal"],
+      ["Variație 1 lună / 3 luni / 1 an", [a.f.chg[0], a.f.chg[1], a.f.chg[3]].map((k) => spct(change(ind.c, i, k), 1)).join(" / "), ""],
     ];
     $("indicators").replaceChildren(el("table", null, el("tbody", null,
       rows.map(([k, v, h]) => el("tr", null, el("td", { text: k }), el("td", { class: "r num", text: v }), el("td", null, el("span", { class: "hint", text: h })))))));
@@ -1892,10 +2062,10 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       el("span", { text: pct(v) }));
     $("odds").replaceChildren(
       el("p", { class: "odds-head" }, el("strong", { text: pct(o.prob) }),
-        `din săptămânile cu scor tehnic similar (${sscore(a.scores.technical)} ±${CFG.bucket}) au fost urmate de creștere în 4 săptămâni.`),
+        `din ${a.f.key === "D" ? "zilele" : "săptămânile"} cu scor tehnic similar (${sscore(a.scores.technical)} ±${CFG.bucket}) au fost urmate de creștere în 4 săptămâni.`),
       meter("Săptămâni similare", o.prob, false),
       meter("Toate săptămânile", o.base, true),
-      el("p", { class: "note", text: `Diferență ${edge >= 0 ? "+" : "−"}${Math.abs(edge * 100).toFixed(1)} puncte · randament mediu ${spct(o.avgRet)} · n = ${o.n} din ${o.total} săptămâni (ultimii ~10 ani).` }),
+      el("p", { class: "note", text: `Diferență ${edge >= 0 ? "+" : "−"}${Math.abs(edge * 100).toFixed(1)} puncte · randament mediu ${spct(o.avgRet)} · n = ${o.n} din ${o.total} ${a.f.unit} (ultimii ~10 ani).` }),
     );
   }
 
@@ -1911,9 +2081,11 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       ["Creștere venituri (trim., an/an)", spct(f.revenueGrowth)],
       ["Creștere profit (trim., an/an)", spct(f.earningsGrowth)],
       ["Marjă de profit", pct(f.profitMargin, 1)],
+      ["Datorii / capital propriu", fin(f.debtToEquity) ? `${f.debtToEquity.toFixed(0)}%` : "n/a"],
+      ["Acțiuni vândute în lipsă (short)", fin(f.shortPct) ? `${pct(f.shortPct, 1)}${fin(f.shortRatio) ? ` · ${f.shortRatio.toFixed(1)} zile de acoperire` : ""}` : "n/a"],
       ["Analiști: medie (1 = cumpără, 5 = vinde)", fin(f.recommendationMean) ? `${f.recommendationMean.toFixed(2)} · ${f.analystCount}` : "n/a"],
       ["Preț țintă analiști", money(f.targetPrice)],
-    ];
+    ].filter(([, v]) => v !== "n/a");
     $("fundamentals").replaceChildren(el("dl", { class: "kv" }, rows.flatMap(([k, v]) => [el("dt", { text: k }), el("dd", { text: v })])));
   }
 
@@ -2037,27 +2209,28 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
 
   async function fetchEntry(mcp, t) {
     setStep("weekly", "active");
-    let weeks;
-    try { weeks = await getWeekly(mcp, t); } catch (e) { setStep("weekly", "fail"); throw e; }
+    let b;
+    try { b = await getBars(mcp, t); } catch (e) { setStep("weekly", "fail"); throw e; }
     setStep("weekly", "done");
 
-    const entry = { ticker: t, day: today(), weeks, overview: null, news: [], overviewError: null, newsError: null, claude: null };
+    const entry = { ticker: t, day: today(), freq: b.freq, weeks: b.bars, overview: null, news: [], overviewError: null, newsError: null, claude: null };
+    // Știrile vin din Alpha Vantage, în paralel cu cererile Twelve Data (fiecare sursă are limita ei).
+    setStep("news", "active");
+    const newsP = avCall(mcp, "NEWS_SENTIMENT", { tickers: t, limit: 50, sort: "LATEST" })
+      .then((p) => { entry.news = parseNews(p, t).slice(0, 30); setStep("news", "done"); })
+      .catch((e) => { entry.newsError = sectionError(e); setStep("news", "fail"); });
     setStep("overview", "active");
     try {
-      entry.overview = parseOverview(await avCall(mcp, "COMPANY_OVERVIEW", { symbol: t }));
-      setStep("overview", entry.overview ? "done" : "skip");
-    } catch (e) {
-      entry.overviewError = sectionError(e);
-      setStep("overview", "fail");
+      entry.overview = parseTdStatistics(await tdCall(mcp, "get_statistics", { symbol: t }));
+    } catch { /* încercăm Alpha Vantage */ }
+    if (!entry.overview) {
+      try {
+        entry.overview = parseOverview(await avCall(mcp, "COMPANY_OVERVIEW", { symbol: t }));
+      } catch (e) {
+        entry.overviewError = sectionError(e);
+      }
     }
-    setStep("news", "active");
-    try {
-      entry.news = parseNews(await avCall(mcp, "NEWS_SENTIMENT", { tickers: t, limit: 50, sort: "LATEST" }), t).slice(0, 30);
-      setStep("news", "done");
-    } catch (e) {
-      entry.newsError = sectionError(e);
-      setStep("news", "fail");
-    }
+    setStep("overview", entry.overview ? "done" : entry.overviewError ? "fail" : "skip");
     if ((dir.get(t) || {}).sector === "ETF") {
       setStep("events", "skip");
     } else {
@@ -2069,6 +2242,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     const m = await ensureMarket(mcp);
     entry.market = m ? { score: m.score, label: m.label, ret4w: m.ret4w, week: m.week } : null;
     setStep("market", m ? "done" : "fail");
+    await newsP;
     return entry;
   }
 

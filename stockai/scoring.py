@@ -63,6 +63,11 @@ def fundamental_score(info: dict[str, Any]) -> float | None:
         # Sub 50% datorii/capital = sănătos, peste 200% = riscant.
         signals.append(float(np.clip((125 - debt) / 75, -1, 1)))
 
+    short = info.get("shortPercent")
+    if short is not None and short >= 0.05:
+        # Mulți investitori pariază pe scădere: semnal de prudență.
+        signals.append(-1.0 if short >= 0.10 else -0.5)
+
     rec = info.get("recommendationMean")
     if rec is not None:
         # 1 = Strong Buy ... 5 = Sell la analiști.
