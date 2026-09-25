@@ -37,10 +37,13 @@ dovezi (vezi „Cum se ia decizia”).
 
 1. **Procent istoric**: cât de des a urcat acțiunea în 20 de zile când scorul tehnic arăta ca azi, față de rata de bază.
 2. **Model statistic** (după `python -m stockai --train`): regresie logistică cu penalizare pe semnale cu dovezi publicate:
-   momentum pe 12 luni (cu un termen separat după un an slab al pieței), revenirea după ultima lună, apropierea de
-   maximul pe 52 de săptămâni, volatilitate, volum neobișnuit, trendul acțiunii și al pieței, surpriza la rezultate.
-   E antrenat pe toată lista de acțiuni, pentru două întrebări: **crește prețul?** și **bate acțiunea S&P 500?**
-   (`--target beat`). A doua e de obicei mai previzibilă: semnalele spun mai mult despre care acțiuni se descurcă
+   momentum pe 12 luni (cu un termen separat după un an slab al pieței și unul pentru informația continuă), revenirea după
+   ultima lună, apropierea de maximul pe 52 de săptămâni, volatilitatea totală și cea proprie, efectul MAX, beta,
+   sezonalitatea pe lună, trendul pe 20/100/200 de zile, volum neobișnuit, trendul pieței, surpriza la rezultate.
+   Prognoza finală combină modelul complet cu media modelelor pe câte un semnal (combinarea prognozelor).
+   E antrenat pe toată lista de acțiuni, pentru trei întrebări: **crește prețul?**, **bate acțiunea S&P 500?**
+   (`--target beat`) și **atinge un trade ținta înaintea stopului?** (`--target trade`: țintă și stop la ±1 abatere
+   tipică pe 4 săptămâni, metoda celor trei bariere a lui López de Prado). A doua e de obicei mai previzibilă: semnalele spun mai mult despre care acțiuni se descurcă
    mai bine decât altele decât despre direcția pieței.
 3. **Verificat pe ani nevăzuți, apoi recalibrat.** Pentru fiecare an, modelul învață doar din anii anteriori și e
    testat pe anul respectiv. Pe rezultatele acestor teste recalibrăm probabilitățile: dacă ordinea dată de model
@@ -103,6 +106,8 @@ logică și în pagină):
 | fără avantaj | semnal puternic (peste ±40) | HOLD | da |
 | fără avantaj | neutre | HOLD, decizie clară | nu |
 
+- **Al doilea filtru („meta-labeling”):** dacă modelul „Trade” spune sigur că stopul e mai probabil decât ținta, un
+  BUY devine HOLD; dacă spune sigur că ținta e mai probabilă, încrederea crește.
 - **„Sigur statistic” cere și un model care a ajutat.** Modelul trebuie să fi ordonat acțiunile sigur mai bine decât
   întâmplarea în anii de test; altfel nu dă BUY/SELL, oricât de sus ar fi un procent.
 - **Porți de siguranță:** pe date de calitate slabă decizia e HOLD. Încrederea scade înaintea unui raport
@@ -147,6 +152,7 @@ Datele descărcate se păstrează în `.cache/` (prețuri 12 ore, rezultate 3 zi
 python -m stockai --train                 # descarcă istoricul listei, testează modelul, îl salvează
 python -m stockai --train --limit 30      # doar primele 30 de acțiuni (mai rapid)
 python -m stockai --train --target beat   # al doilea model: șansele de a bate S&P 500
+python -m stockai --train --target trade  # al treilea: ținta atinsă înaintea stopului
 python -m stockai AAPL MSFT NVDA          # analiză; Claude doar la semnalele neclare
 python -m stockai AAPL --always-claude    # Claude la fiecare acțiune
 python -m stockai AAPL --no-claude        # fără costuri Claude

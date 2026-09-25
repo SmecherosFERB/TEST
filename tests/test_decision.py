@@ -96,3 +96,13 @@ def test_track_record_gate(tmp_path):
     track._write(path, rows)
     assert track.claude_worse(path) is True
     assert track.claude_worse(path, min_n=100) is False
+
+
+def test_trade_model_confirms_or_blocks_a_decision():
+    trade_up = est(0.58, 0.55, 0.61, base=0.50)
+    trade_down = est(0.42, 0.39, 0.45, base=0.50)
+    confirmed = base_decision(SURE_UP, "HOLD", 0, EDGE, trade_est=trade_up)
+    assert confirmed.action == "BUY" and confirmed.confidence == "high" and any("confirmă" in w for w in confirmed.why)
+    blocked = base_decision(SURE_UP, "BUY", 40, EDGE, trade_est=trade_down)
+    assert blocked.action == "HOLD" and any("contrazice" in w for w in blocked.why)
+    assert base_decision(SURE_UP, "BUY", 40, EDGE, trade_est=est(0.51, 0.47, 0.55, base=0.50)).action == "BUY"

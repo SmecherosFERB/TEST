@@ -52,6 +52,22 @@ class TwelveData:
     def insiders(self, symbol: str) -> list[dict[str, Any]]:
         return parse_insiders(self._get("insider_transactions", symbol))
 
+    def eps_trend(self, symbol: str) -> dict[str, Any] | None:
+        return parse_eps_trend(self._get("eps_trend", symbol))
+
+
+def parse_eps_trend(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Estimarea de profit pe acest an și pe anul viitor, acum și acum 30 / 90 de zile."""
+    out = {}
+    for row in payload.get("eps_trend") or []:
+        period = row.get("period")
+        if period not in ("current_year", "next_year"):
+            continue
+        cur, d30, d90 = _num(row.get("current_estimate")), _num(row.get("30_days_ago")), _num(row.get("90_days_ago"))
+        if cur is not None and d30 and d90:
+            out[period] = {"current": cur, "30_days_ago": d30, "90_days_ago": d90}
+    return out or None
+
 
 def parse_time_series(payload: dict[str, Any], symbol: str) -> pd.DataFrame:
     if payload.get("status") == "error" or "values" not in payload:

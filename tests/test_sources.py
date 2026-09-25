@@ -255,3 +255,20 @@ def test_twelve_data_statistics_earnings_insiders():
     ]})
     assert [(t["owner"], t["code"], t["price"]) for t in trades] == [
         ("NEWSTEAD JENNIFER", "S", 330.19), ("DOE JANE", "P", 150.0), ("Y", "S", 290.0)]
+
+
+def test_eps_trend_and_revision_signal_on_the_real_twelve_data_shape():
+    from stockai.signals import revision_signal
+    from stockai.sources.twelvedata import parse_eps_trend
+
+    # Răspunsul real Twelve Data (AAPL, 25 sep 2026), câmpurile folosite.
+    trend = parse_eps_trend({"eps_trend": [
+        {"date": "2026-09-30", "period": "current_quarter", "current_estimate": 1.97754, "30_days_ago": 1.97656, "90_days_ago": 2.00836},
+        {"date": "2026-09-30", "period": "current_year", "current_estimate": 8.81945, "30_days_ago": 8.80978, "90_days_ago": 8.75958},
+        {"date": "2027-09-30", "period": "next_year", "current_estimate": 9.58154, "30_days_ago": 9.53691, "90_days_ago": 9.67425},
+    ]})
+    assert set(trend) == {"current_year", "next_year"}
+    sig = revision_signal(trend)
+    assert abs(sig["change"] - 0.0008) < 0.0002 and 0 < sig["score"] < 5
+    assert revision_signal({"current_year": {"current": 10.3, "30_days_ago": 10.0, "90_days_ago": 10.0}})["score"] == 100
+    assert revision_signal(None) is None

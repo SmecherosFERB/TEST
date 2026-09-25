@@ -25,7 +25,7 @@ from .scoring import (
     sentiment_score,
     technical_score,
 )
-from .signals import earnings_signal, insider_signal, macro_signal, market_signal
+from .signals import earnings_signal, insider_signal, macro_signal, market_signal, realized_vol, revision_signal
 
 log = logging.getLogger(__name__)
 
@@ -36,6 +36,7 @@ COMPONENT_NAMES = {
     "sentiment": "sentiment",
     "earnings": "rezultate",
     "insiders": "insideri",
+    "revisions": "analiști",
     "market": "piață",
 }
 
@@ -52,6 +53,7 @@ class Recommendation:
     extras: dict[str, Any] = field(default_factory=dict)
     model: dict[str, Any] | None = None
     model_beat: dict[str, Any] | None = None
+    model_trade: dict[str, Any] | None = None
     honest: dict[str, Any] | None = None
     claude: ClaudeVerdict | None = None
     claude_error: str | None = None
@@ -89,6 +91,7 @@ class Recommendation:
             "historical_odds": asdict(self.odds) if self.odds else None,
             "model": self.model,
             "model_beat_sp500": self.model_beat,
+            "model_trade": self.model_trade,
             "estimate": self.honest,
             "extras": self.extras,
             "ambiguity_reasons": self.ambiguity_reasons,
@@ -173,6 +176,7 @@ class Analyzer:
         model: Any | None = None,
         beat_model: Any | None = None,
         claude_worse: bool = False,
+        trade_model: Any | None = None,
     ) -> None:
         self.data = data
         self.settings = settings or Settings()
@@ -180,6 +184,7 @@ class Analyzer:
         self.claude_mode = claude_mode
         self.model = model
         self.beat_model = beat_model
+        self.trade_model = trade_model
         # True când, în predicțiile verificate, Claude a greșit mai des decât statistica (vezi track.claude_worse).
         self.claude_worse = claude_worse
 
@@ -211,6 +216,7 @@ class Analyzer:
         trades = self._optional("insiders", ticker, close=prices["Close"])
         macro_raw = self._optional("macro")
         upcoming = self._optional("next_earnings", ticker)
+        trend = self._optional("revisions", ticker)
 
         f = fundamentals or {}
         quality = check_prices(prices, today=date.today(), fifty_two_week_high=f.get("fiftyTwoWeekHigh"),
@@ -223,6 +229,7 @@ class Analyzer:
             "earnings": earnings_signal(quarters, today),
             "insiders": insider_signal(trades, today),
             "next_earnings": _next_earnings(upcoming),
+            "revisions": revision_signal(trend),
         }
         market_parts = [x["score"] for x in (extras["market"], extras["macro"]) if x]
         scores: dict[str, float | None] = {
@@ -231,6 +238,7 @@ class Analyzer:
             "sentiment": sentiment_score(news),
             "earnings": extras["earnings"]["score"] if extras["earnings"] else None,
             "insiders": extras["insiders"]["score"] if extras["insiders"] else None,
+            "revisions": extras["revisions"]["score"] if extras["revisions"] else None,
             "market": float(np.mean(market_parts)) if market_parts else None,
         }
         scores["composite"] = composite_score(scores, s.weights)
@@ -238,6 +246,12 @@ class Analyzer:
         odds = historical_odds(ind["close"], tech, scores["technical"], s.horizon_days, s.bucket_width)
         model_out = self._model_probability(self.model, prices, market_close, quarters)
         beat_out = self._model_probability(self.beat_model, prices, market_close, quarters)
+        trade_out = self._model_probability(self.trade_model, prices, market_close, quarters)
+        if trade_out:
+            # Ținta și stopul: ±1 abatere tipică pe orizont, de la prețul de azi.
+            width = float(realized_vol(prices["Close"], 60).iloc[-1] * np.sqrt(s.horizon_days / 252))
+            price = float(prices["Close"].iloc[-1])
+            trade_out["take_profit"], trade_out["stop_loss"] = price * np.exp(width), price * np.exp(-width)
         # Modelul recalibrat pe anii nevăzuți are deja intervalul lui; altfel, istoricul acțiunii tras spre model.
         honest = model_estimate(model_out, odds) or honest_estimate(
             odds,
@@ -256,11 +270,12 @@ class Analyzer:
             extras={k: v for k, v in {**extras, "macro_raw": macro_raw}.items() if v},
             model=model_out,
             model_beat=beat_out,
+            model_trade=trade_out,
             honest=honest,
         )
         nxt = extras.get("next_earnings")
         base = base_decision(honest, rule_decision, scores["composite"], s.min_edge, quality.grade,
-                             nxt["days"] if nxt else None)
+                             nxt["days"] if nxt else None, trade_est=model_estimate(trade_out, None))
         rec.final = base
         rec.ambiguity_reasons = list(base.ask)
         if base.action != "HOLD":
@@ -370,6 +385,11 @@ class Analyzer:
             ),
             "statistical_model": _model_context(rec.model),
             "statistical_model_beat_sp500": _model_context(rec.model_beat),
+            "statistical_model_trade_target_before_stop": (
+                {**_model_context(rec.model_trade), "take_profit": round(rec.model_trade["take_profit"], 2),
+                 "stop_loss": round(rec.model_trade["stop_loss"], 2)} if rec.model_trade else None
+            ),
+            "analyst_eps_revisions": rec.extras.get("revisions"),
             "next_earnings": rec.extras.get("next_earnings"),
             "data_quality": {k: v for k, v in (rec.extras.get("quality") or {}).items() if k != "checks"} or None,
             "market_trend_sp500": rec.extras.get("market"),

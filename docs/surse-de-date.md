@@ -25,6 +25,9 @@ furnizorului înainte să plătești ceva.
 | Model de probabilitate verificat walk-forward și recalibrat pe anii nevăzuți | da (`--train`) | da (învață din acțiunile scanate) |
 | Ținta „bate S&P 500” (randament relativ) | da (`--train --target beat`) | da |
 | Verificarea calității datelor și reguli de selecție (lichiditate, sector, bare închise) | da (`quality.py`) | da |
+| Semnale noi: MAX, volatilitate proprie, informație continuă, sezonalitate, medii pe 20/100 zile | da | da |
+| Modelul „Trade” (ținta înaintea stopului) și combinarea prognozelor | da (`--train --target trade`) | da |
+| Reviziile analiștilor (Twelve Data `eps_trend`) | da | da (analiza completă) |
 | Data următorului raport trimestrial (avertizare) | da (Twelve Data, altfel calendarul Alpha Vantage) | da (calendarul complet Alpha Vantage, o cerere pe zi pentru toată lista) |
 
 ## Ce îmbunătățește realist predicția
@@ -59,10 +62,42 @@ Mai multe surse nu înseamnă automat predicții mai bune. Ce contează:
      semnale. Chiar și cele mai bune modele explică doar ~0,3–0,4% din variația randamentelor lunare.
    - *beta față de S&P 500* (Frazzini și Pedersen, 2014, „Betting Against Beta”): acțiunile cu beta mare au
      randamente ajustate la risc mai mici; pentru „bate S&P 500”, beta spune și cât amplifică acțiunea mișcarea pieței.
+   - *efectul MAX* (Bali, Cakici și Whitelaw, 2011): acțiunile cu o creștere extremă de o zi în ultima lună
+     („loterii”) rămân în urmă; diferența între decile depășește 1% pe lună;
+   - *volatilitatea proprie* (Ang, Hodrick, Xing și Zhang, 2006): volatilitate mare după scoaterea părții pieței →
+     randamente slabe luna următoare;
+   - *informația continuă* („frog in the pan”, Da, Gurun și Warachka, 2014): momentumul format din multe mișcări mici
+     continuă mult mai bine decât cel format din câteva salturi;
+   - *sezonalitatea pe lună* (Heston și Sadka, 2008): o acțiune tinde să aibă randamente relativ bune sau slabe în
+     aceeași lună calendaristică, an de an;
+   - *trendul pe mai multe orizonturi* (Han, Zhou și Zhu, 2016): prețul față de mediile pe 20, 100 și 200 de zile;
+   - *reviziile analiștilor* (Chan, Jegadeesh și Lakonishok, 1996): estimările de profit revizuite în sus sunt urmate
+     de randamente mai bune; vin gratuit din Twelve Data (`eps_trend`), în analiza completă.
 5. **Randament relativ în loc de absolut.** Dacă acțiunea urcă în 4 săptămâni depinde mult de piață,
    pe care nimeni nu o prezice bine. Semnalele de mai sus spun mai mult despre care acțiuni se descurcă
    mai bine decât altele. De aceea modelul are și ținta „bate S&P 500”.
-6. **Așteptări realiste.** McLean și Pontiff (2016) au studiat 97 de semnale publicate:
+6. **Metode, nu doar semnale.**
+   - *trade cu trei bariere* (López de Prado): în loc de „crește sau nu”, modelul „Trade” estimează șansa ca ținta
+     (+1 abatere tipică pe 4 săptămâni) să fie atinsă înaintea stopului (−1 abatere), cu intrare la închiderea de a doua
+     zi. Același model e folosit ca al doilea filtru al deciziei („meta-labeling”): un BUY pe care trade-ul îl contrazice
+     sigur devine HOLD;
+   - *combinarea prognozelor* (Rapach, Strauss și Zhou, 2010): prognoza finală e jumătate modelul complet, jumătate
+     media modelelor cu câte un singur semnal. Pe date simulate, varianta combinată a dat mai multe BUY-uri corecte cu
+     aceeași precizie, și zero alarme false pe zgomot; doar modelele simple au dat 390 de BUY-uri greșite.
+7. **Ce am cântărit și nu am adoptat (încă):**
+   - *arbori de decizie și rețele neuronale* (Gu, Kelly și Xiu): câștigă pe ~30.000 de acțiuni și 60 de ani; pe ~115
+     acțiuni și 12 ani învață zgomotul;
+   - *randamente de noapte față de zi* (Lou, Polk și Skouras, 2019): efectul e în componenta de noapte, nu clar în
+     randamentul total pe 4 săptămâni;
+   - *semnale din opțiuni* (skew, put/call): date plătite;
+   - *calendarul rezultatelor Twelve Data*: cere planul Grow; folosim calendarul gratuit Alpha Vantage;
+   - *atenția pe Google, tranzacțiile congresmenilor, RSI(2)*: fără conector sau cu dovezi slabe;
+   - *ranguri între acțiuni în fiecare lună*: fără câștig dovedibil la dimensiunea noastră.
+8. **Disciplina testelor multiple.** Harvey, Liu și Zhu (2016) cer un prag t > 3 pentru semnale noi, iar Hou, Xue și
+   Zhang (2020) arată că 65% din 452 de anomalii publicate nu trec nici pragul obișnuit. De aceea semnalele de aici sunt
+   alese dinainte din literatură (nu căutate în date), modelul trebuie să ajute sigur statistic pe ani nevăzuți ca să
+   poată da BUY/SELL, iar regula de decizie e testată an cu an, fără privit înainte.
+9. **Așteptări realiste.** McLean și Pontiff (2016) au studiat 97 de semnale publicate:
    randamentele scad cu 26% în afara perioadei studiate și cu 58% după publicare. Orice semnal
    „descoperit” trebuie verificat pe date noi.
 

@@ -24,6 +24,7 @@ class Settings:
             "sentiment": 0.10,
             "earnings": 0.15,
             "insiders": 0.10,
+            "revisions": 0.10,
             "market": 0.15,
         }
     )
@@ -40,6 +41,8 @@ class Settings:
     model_path: str = field(default_factory=lambda: os.getenv("STOCKAI_MODEL", ".cache/model.pkl"))
     # Al doilea model: șansele ca acțiunea să bată S&P 500 (python -m stockai --train --target beat).
     beat_model_path: str = field(default_factory=lambda: os.getenv("STOCKAI_MODEL_BEAT", ".cache/model_beat.pkl"))
+    # Al treilea: trade-ul cu țintă și stop (python -m stockai --train --target trade).
+    trade_model_path: str = field(default_factory=lambda: os.getenv("STOCKAI_MODEL_TRADE", ".cache/model_trade.pkl"))
 
     claude_model: str = field(default_factory=lambda: os.getenv("CLAUDE_MODEL", "claude-opus-5"))
     claude_effort: str = field(default_factory=lambda: os.getenv("CLAUDE_EFFORT", "high"))

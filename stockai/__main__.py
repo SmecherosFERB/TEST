@@ -27,6 +27,7 @@ SCORE_LABELS = [
     ("sentiment", "sentiment"),
     ("earnings", "rezultate"),
     ("insiders", "insideri"),
+    ("revisions", "analiști"),
     ("market", "piață"),
     ("composite", "compus"),
 ]
@@ -50,7 +51,9 @@ def render(rec: Recommendation) -> str:
     if rec.final and rec.final.why:
         lines.append("De ce: " + "; ".join(rec.final.why))
     lines.append("Scoruri: " + " · ".join(f"{label} {fmt_score(s.get(key))}" for key, label in SCORE_LABELS))
-    for m, what in ((rec.model, "șanse de creștere"), (rec.model_beat, "șanse să bată S&P 500")):
+    trade_what = (f"șanse ca ținta ({rec.model_trade['take_profit']:.2f}) să fie atinsă înaintea stopului"
+                  f" ({rec.model_trade['stop_loss']:.2f})" if rec.model_trade and "take_profit" in rec.model_trade else "")
+    for m, what in ((rec.model, "șanse de creștere"), (rec.model_beat, "șanse să bată S&P 500"), (rec.model_trade, trade_what)):
         if not m:
             continue
         interval = f"interval 90%: {m['lo']:.0%}–{m['hi']:.0%}, " if m.get("lo") is not None else ""
@@ -94,6 +97,9 @@ def render(rec: Recommendation) -> str:
             f"Rezultate: surpriză {surprise} la raportul din {e['last_reported']} (acum {e['days_since']} zile),"
             f" estimări depășite {e['beats_last4']} din ultimele trimestre"
         )
+    if x.get("revisions"):
+        r = x["revisions"]
+        lines.append(f"Analiști: estimările de profit s-au schimbat în medie cu {r['change']:+.1%} (30 și 90 de zile)")
     if x.get("next_earnings"):
         n = x["next_earnings"]
         warn = " · ATENȚIE: cade în perioada estimată, prețul poate sări mult în orice direcție" if n["days"] <= 28 else ""
@@ -148,7 +154,7 @@ def train(tickers: list[str], settings: Settings, with_earnings: bool, target: s
     model = ProbabilityModel(settings.horizon_days, target).fit(data)
     # Probabilitățile afișate sunt recalibrate pe rezultatele din anii nevăzuți.
     model.calibration = report.recalibration
-    path = settings.beat_model_path if target == "beat" else settings.model_path
+    path = {"beat": settings.beat_model_path, "trade": settings.trade_model_path}.get(target, settings.model_path)
     model.save(path)
     print(f"\nModel salvat în {path} ({model.info['rows']} rânduri, {model.info['tickers']} acțiuni,"
           f" {model.info['from']} → {model.info['to']}).")
@@ -201,8 +207,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--train", action="store_true",
                         help="antrenează modelul de probabilitate pe lista de acțiuni (sau pe simbolurile date)")
     parser.add_argument("--limit", type=int, default=None, help="la --train: doar primele N acțiuni din listă")
-    parser.add_argument("--target", choices=["up", "beat"], default="up",
-                        help="la --train: up = prețul crește (implicit), beat = acțiunea bate S&P 500")
+    parser.add_argument("--target", choices=["up", "beat", "trade"], default="up",
+                        help="la --train: up = prețul crește (implicit), beat = acțiunea bate S&P 500,"
+                             " trade = ținta (+1 abatere tipică) e atinsă înaintea stopului")
     parser.add_argument("--with-earnings", action="store_true",
                         help="la --train: include surprizele la rezultate (o cerere Alpha Vantage pe acțiune)")
     parser.add_argument("--evaluate", action="store_true",
@@ -235,13 +242,14 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print("Notă: ANTHROPIC_API_KEY lipsește, rulez doar pe reguli.", file=sys.stderr)
     model, beat_model = load_model(settings.model_path), load_model(settings.beat_model_path)
+    trade_model = load_model(settings.trade_model_path)
     if model is None:
         print("Notă: modelul de probabilitate nu e antrenat încă (python -m stockai --train).", file=sys.stderr)
 
     from . import track
 
     analyzer = Analyzer(MarketData(), settings=settings, advisor=advisor, claude_mode=claude_mode,
-                        model=model, beat_model=beat_model, claude_worse=track.claude_worse())
+                        model=model, beat_model=beat_model, claude_worse=track.claude_worse(), trade_model=trade_model)
     results, failed = [], False
     for ticker in args.tickers:
         try:

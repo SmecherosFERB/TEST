@@ -225,6 +225,22 @@ class MarketData:
             self.cache.set_json(key, trades)
         return trades
 
+    def revisions(self, ticker: str) -> dict[str, Any] | None:
+        """Reviziile estimărilor de profit ale analiștilor (Twelve Data), păstrate o zi."""
+        if self.td is None:
+            return None
+        key = f"eps_trend_{ticker}"
+        cached = self.cache.get_json(key, max_age_hours=24)
+        if cached is not None:
+            return cached or None
+        try:
+            trend = self.td.eps_trend(ticker)
+        except DataError as exc:
+            log.warning("%s", exc)
+            return None
+        self.cache.set_json(key, trend or {})
+        return trend
+
     def macro(self) -> dict[str, Any] | None:
         snap = self.fred.snapshot()
         return snap or None

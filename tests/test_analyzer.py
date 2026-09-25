@@ -60,9 +60,9 @@ def test_analyze_never_calls_claude_in_never_mode(prices):
     assert advisor.contexts == []
     assert rec.ticker == "AAPL" and rec.decided_by == "statistică"
     assert rec.decision == rec.final.action and rec.final.why
-    assert set(rec.scores) == {"technical", "fundamental", "sentiment", "earnings", "insiders", "market", "composite"}
+    assert set(rec.scores) == {"technical", "fundamental", "sentiment", "earnings", "insiders", "revisions", "market", "composite"}
     # FakeData nu are surse opționale: componentele lor lipsesc, fără să oprească analiza.
-    assert rec.scores["earnings"] is rec.scores["insiders"] is rec.scores["market"] is None
+    assert rec.scores["earnings"] is rec.scores["insiders"] is rec.scores["market"] is rec.scores["revisions"] is None
 
 
 def test_analyze_always_mode_uses_claude_decision(prices):
@@ -83,9 +83,9 @@ def test_analyze_auto_mode_asks_only_when_ambiguous(prices, monkeypatch):
 
     from stockai.decision import Decision
 
-    monkeypatch.setattr("stockai.analyzer.base_decision", lambda *a: Decision(why=["clar"]))
+    monkeypatch.setattr("stockai.analyzer.base_decision", lambda *a, **k: Decision(why=["clar"]))
     assert analyzer.analyze("X").claude is None
-    monkeypatch.setattr("stockai.analyzer.base_decision", lambda *a: Decision(why=["?"], ask=["neclar"]))
+    monkeypatch.setattr("stockai.analyzer.base_decision", lambda *a, **k: Decision(why=["?"], ask=["neclar"]))
     assert analyzer.analyze("X").claude is not None
     assert len(advisor.contexts) == 1
 

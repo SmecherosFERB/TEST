@@ -71,7 +71,8 @@ def test_walk_forward_finds_real_signal_and_model_roundtrip(tmp_path):
     # un model care a ajutat în test dă probabilități diferite de la o situație la alta
     assert est["p"].std() > 0.01
     top = next(iter(loaded.coefficients()))
-    assert top in ("ret_1m", "tech", "mom_12_1", "dist_sma200", "high_52w")
+    # lumea simulată are un trend pe o lună: câștigă semnalele de trend pe termen scurt
+    assert top in ("ret_1m", "tech", "mom_12_1", "dist_sma200", "high_52w", "dist_sma20", "dist_sma100")
 
 
 def test_walk_forward_on_pure_noise_does_not_beat_base_rate_by_much():
@@ -169,3 +170,32 @@ def test_decision_backtest_makes_no_calls_on_noise_and_right_calls_on_signal():
     d = rep.decisions
     assert d["buy"] > 0 and d["buy_hit"] / d["buy"] > d["buy_same_month"] / d["buy"]
     assert "Regula de decizie" in rep.render()
+
+
+def test_new_signals_are_computed_without_looking_ahead():
+    from stockai.model import seasonality_series, trade_labels
+
+    px = make_prices(n=1500)
+    f = feature_frame(px, px["Close"] * 1.0, None)
+    last = f.iloc[-1]
+    daily = px["Close"].pct_change()
+    assert np.isclose(last["max_21d"], min(0.3, daily.iloc[-21:].max()))
+    assert -0.15 <= last["seasonality"] <= 0.15 and np.isfinite(last["fip"])
+    # sezonalitatea de azi nu se schimbă dacă modificăm prețurile de după azi
+    cut = px.index[-200]
+    changed = px.copy()
+    changed.loc[changed.index > cut, "Close"] *= 1.5
+    assert np.isclose(seasonality_series(px["Close"]).loc[cut], seasonality_series(changed["Close"]).loc[cut])
+
+    # trade: ținta atinsă prima → 1, stopul primul → 0 (intrare la închiderea de a doua zi)
+    idx = pd.bdate_range("2026-01-01", periods=30)
+    up = pd.Series([100, 100] + [100 + k for k in range(1, 29)], index=idx, dtype=float)
+    down = pd.Series([100, 100] + [100 - k for k in range(1, 29)], index=idx, dtype=float)
+    width = pd.Series(0.05, index=idx)
+    assert trade_labels(up, width, 20).iloc[0] == 1.0 and trade_labels(down, width, 20).iloc[0] == 0.0
+
+
+def test_trade_target_builds_a_dataset():
+    prices, market = momentum_world(n_stocks=3, n_days=1200)
+    data = build_dataset(prices, market, horizon=20, target="trade")
+    assert data["label"].isin([0.0, 1.0]).all() and 0.2 < data["label"].mean() < 0.8

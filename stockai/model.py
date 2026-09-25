@@ -41,6 +41,12 @@ FEATURES = [
     "mkt_ret_1m",
     "mom_bear",
     "beta_1y",
+    "max_21d",
+    "ivol_60d",
+    "fip",
+    "seasonality",
+    "dist_sma20",
+    "dist_sma100",
     "earn_surprise",
 ]
 FEATURE_NAMES = {
@@ -55,13 +61,61 @@ FEATURE_NAMES = {
     "mkt_ret_1m": "randamentul pieței în ultima lună",
     "mom_bear": "momentum după un an slab al pieței",
     "beta_1y": "beta față de S&P 500 (1 an)",
+    "max_21d": "cea mai mare creștere de o zi din ultima lună (efectul „loterie”)",
+    "ivol_60d": "volatilitatea proprie, fără partea pieței",
+    "fip": "momentum format din mișcări mici și continue",
+    "seasonality": "sezonalitate: aceeași lună în anii trecuți",
+    "dist_sma20": "distanța față de media pe 20 zile",
+    "dist_sma100": "distanța față de media pe 100 zile",
     "earn_surprise": "surpriza la ultimele rezultate",
 }
-TARGETS = {"up": "creștere", "beat": "bate S&P 500"}
+TARGETS = {"up": "creștere", "beat": "bate S&P 500", "trade": "ținta înaintea stopului"}
 # Două clase de acțiuni ale aceleiași companii au aproape aceleași prețuri: în model contează o singură dată.
 SAME_COMPANY = {"GOOG": "GOOGL", "BRK.A": "BRK.B", "FOX": "FOXA", "NWS": "NWSA", "UA": "UAA", "LEN.B": "LEN", "HEI.A": "HEI"}
 # Penalizare L2 pe observație (λ = RIDGE · n): efectele reale sunt mici, zgomotul e mare.
 RIDGE = 0.1
+# Combinația de prognoze (Rapach, Strauss și Zhou, 2010): jumătate modelul complet, jumătate media modelelor simple.
+COMBINE = 0.5
+
+
+def seasonality_series(close: pd.Series, years: int = 10) -> pd.Series:
+    """Heston și Sadka (2008): media randamentelor din aceeași lună calendaristică în anii trecuți, față de media
+    tuturor lunilor din aceiași ani. Luna vizată e cea în care cade mijlocul ferestrei de 4 săptămâni (azi + 15 zile).
+    Folosește doar luni încheiate înainte de ziua respectivă."""
+    month_end = close.groupby(close.index.to_period("M")).last()
+    monthly = (month_end / month_end.shift(1) - 1).dropna()
+    out = pd.Series(0.0, index=close.index)
+    target = (close.index + pd.Timedelta(days=15)).to_period("M")
+    current = close.index.to_period("M")
+    for (cur, tgt), idx in pd.Series(range(len(close)), index=close.index).groupby([current, target]):
+        done = monthly[monthly.index < cur]
+        done = done[done.index.year >= tgt.year - years]
+        same = done[(done.index.month == tgt.month) & (done.index.year < tgt.year)]
+        if len(same) >= 3 and len(done) >= 24:
+            out.iloc[idx.to_numpy()] = float(same.mean() - done.mean())
+    return out
+
+
+def trade_labels(close: pd.Series, width: pd.Series, horizon: int) -> pd.Series:
+    """Trade cu trei bariere (López de Prado): intrare la închiderea de a doua zi, țintă +width, stop −width (în log),
+    ieșire după `horizon` zile. 1 = ținta atinsă prima (sau câștig la final), 0 = stopul primul."""
+    c = np.log(close.to_numpy(dtype=float))
+    w = width.to_numpy(dtype=float)
+    n = len(c)
+    out = np.full(n, np.nan)
+    for i in range(n - horizon - 1):
+        if not np.isfinite(w[i]) or w[i] <= 0:
+            continue
+        path = c[i + 2: i + 2 + horizon] - c[i + 1]
+        hit_up = np.flatnonzero(path >= w[i])
+        hit_dn = np.flatnonzero(path <= -w[i])
+        if hit_up.size and (not hit_dn.size or hit_up[0] < hit_dn[0]):
+            out[i] = 1.0
+        elif hit_dn.size:
+            out[i] = 0.0
+        else:
+            out[i] = float(path[-1] > 0)
+    return pd.Series(out, index=close.index)
 
 
 def feature_frame(
@@ -78,6 +132,18 @@ def feature_frame(
     f["high_52w"] = high_52w_gap(close).clip(-0.8, 0.0)
     f["vol_60d"] = np.log(realized_vol(close, 60).clip(0.05, 2.0))
     f["dist_sma200"] = (close / ind["sma200"] - 1).clip(-0.6, 1.0)
+    f["dist_sma20"] = (close / close.rolling(20).mean() - 1).clip(-0.3, 0.3)
+    f["dist_sma100"] = (close / close.rolling(100).mean() - 1).clip(-0.5, 0.8)
+    daily = close.pct_change()
+    # Efectul MAX (Bali, Cakici și Whitelaw, 2011): cea mai mare creștere de o zi din ultima lună.
+    f["max_21d"] = daily.rolling(21).max().clip(0.0, 0.3)
+    # Informația continuă (Da, Gurun și Warachka, 2014): multe mișcări mici fac momentumul mai persistent.
+    raw_mom = momentum_12_1(close)
+    pos = (daily > 0).astype(float).shift(21).rolling(230).sum()
+    neg = (daily < 0).astype(float).shift(21).rolling(230).sum()
+    discreteness = np.sign(raw_mom) * (neg - pos) / 230
+    f["fip"] = np.log1p(raw_mom.clip(-0.9, 4.0)) * (-discreteness).clip(-0.5, 0.5)
+    f["seasonality"] = seasonality_series(close).clip(-0.15, 0.15)
     volume = prices["Volume"] if "Volume" in prices else pd.Series(0.0, index=close.index)
     v20, v250 = volume.rolling(20).mean(), volume.rolling(250).mean()
     trend = np.log(v20.where(v20 > 0) / v250.where(v250 > 0))
@@ -91,12 +157,17 @@ def feature_frame(
         f["mom_bear"] = f["mom_12_1"].where(bear, 0.0).where(m.shift(252).notna())
         # Beta pe ultimul an (Frazzini și Pedersen, 2014: acțiunile cu beta mare au randamente ajustate la risc mai mici).
         rs, rm = np.log(close).diff(), np.log(m).diff()
-        f["beta_1y"] = (rs.rolling(252, min_periods=200).cov(rm) / rm.rolling(252, min_periods=200).var()).clip(-0.5, 3.0)
+        beta = rs.rolling(252, min_periods=200).cov(rm) / rm.rolling(252, min_periods=200).var()
+        f["beta_1y"] = beta.clip(-0.5, 3.0)
+        # Volatilitatea proprie (Ang, Hodrick, Xing și Zhang, 2006): ce rămâne după partea explicată de piață.
+        ivol = (rs - beta * rm).rolling(60).std() * np.sqrt(252)
+        f["ivol_60d"] = np.log(ivol.clip(0.03, 2.0))
     else:
         f["mkt_regime"] = 0.0
         f["mkt_ret_1m"] = 0.0
         f["mom_bear"] = 0.0
         f["beta_1y"] = 1.0
+        f["ivol_60d"] = np.log((np.log(close).diff().rolling(60).std() * np.sqrt(252)).clip(0.03, 2.0))
     f["earn_surprise"] = earnings_surprise_series(quarters, close.index)
     return f[FEATURES]
 
@@ -135,6 +206,9 @@ def build_dataset(
             m = market_close.reindex(close.index, method="ffill")
             mfwd = m.shift(-(horizon + 1)) / m.shift(-1) - 1
             f["label"] = (fwd > mfwd).astype(float).where(fwd.notna() & mfwd.notna())
+        elif target == "trade":
+            width = np.exp(f["vol_60d"]) * np.sqrt(horizon / 252)
+            f["label"] = trade_labels(close, width, horizon)
         else:
             f["label"] = (fwd > 0).astype(float).where(fwd.notna())
         if quality.suspect:
@@ -278,8 +352,12 @@ class ProbabilityModel:
 
     def fit(self, data: pd.DataFrame) -> ProbabilityModel:
         C = self.C if self.C is not None else 1 / (RIDGE * len(data))
+        X, y = data[self.features].to_numpy(), data["label"].astype(int).to_numpy()
         self.pipe = make_pipeline(StandardScaler(), LogisticRegression(C=C, max_iter=2000))
-        self.pipe.fit(data[self.features].to_numpy(), data["label"].astype(int).to_numpy())
+        self.pipe.fit(X, y)
+        # Câte un model simplu pe fiecare semnal, pentru combinația de prognoze.
+        Z = self.pipe[0].transform(X)
+        self.simple = [LogisticRegression(C=C, max_iter=500).fit(Z[:, [j]], y) for j in range(Z.shape[1])]
         self.base_rate = float(data["label"].mean())
         self.info = {
             "rows": int(len(data)),
@@ -291,8 +369,15 @@ class ProbabilityModel:
         return self
 
     def predict(self, features: pd.DataFrame) -> np.ndarray:
-        """Probabilitatea brută a modelului."""
-        return self.pipe.predict_proba(features[self.features].to_numpy())[:, 1]
+        """Probabilitatea brută: combinația dintre modelul complet și media modelelor simple."""
+        X = features[self.features].to_numpy()
+        full = self.pipe.predict_proba(X)[:, 1]
+        simple = getattr(self, "simple", None)
+        if not simple:
+            return full
+        Z = self.pipe[0].transform(X)
+        avg = np.mean([m.predict_proba(Z[:, [j]])[:, 1] for j, m in enumerate(simple)], axis=0)
+        return (1 - COMBINE) * full + COMBINE * avg
 
     def estimate(self, features: pd.DataFrame) -> dict[str, np.ndarray | float]:
         """Probabilitatea recalibrată pe anii nevăzuți, cu intervalul de 90%. Fără recalibrare: cea brută."""
@@ -350,7 +435,7 @@ class BacktestReport:
         return self.n / self.recalibration.deff if self.recalibration else float(self.n)
 
     def render(self) -> str:
-        what = "a urcat" if self.target == "up" else "a bătut S&P 500"
+        what = {"up": "a urcat", "beat": "a bătut S&P 500", "trade": "a atins ținta prima"}[self.target]
         lines = [
             f"Test walk-forward ({TARGETS[self.target]}), orizont {self.horizon} zile, {self.n} predicții"
             f" (~{self.n_independent:.0f} cazuri independente):",

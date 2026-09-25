@@ -64,6 +64,7 @@ def base_decision(
     quality_grade: str | None = None,
     earnings_in_days: int | None = None,
     horizon_days: int = 28,
+    trade_est: dict[str, Any] | None = None,
 ) -> Decision:
     if quality_grade == "slabă":
         return Decision(why=["datele de preț au probleme: nu decidem pe date nesigure"])
@@ -97,6 +98,16 @@ def base_decision(
         d.why.append(f"statistica nu arată un avantaj ({_pct(est['p'])}, interval {interval})")
         if abs(composite) >= STRONG_RULE:
             d.ask.append(f"regulile dau un semnal puternic ({composite:+.0f}), dar statistica nu arată niciun avantaj ({interval})")
+    # Al doilea filtru („meta-labeling”, López de Prado): trade-ul cu țintă și stop nu trebuie să contrazică decizia.
+    if d.action != "HOLD" and trade_est and trade_est.get("sure"):
+        against = (d.action == "BUY" and trade_est["sure"] == "down") or (d.action == "SELL" and trade_est["sure"] == "up")
+        detail = f"{_pct(trade_est['p'])} șanse ca ținta să fie atinsă prima, de obicei {_pct(trade_est['base'])}"
+        if against:
+            d.why.append(f"trade-ul cu țintă și stop contrazice decizia ({detail}): HOLD")
+            d.action, d.confidence = "HOLD", "low"
+        else:
+            d.confidence = "high" if d.confidence == "medium" else d.confidence
+            d.why.append(f"trade-ul cu țintă și stop confirmă ({detail})")
     if d.action != "HOLD":
         if earnings_in_days is not None and 0 <= earnings_in_days <= horizon_days:
             d.confidence = _lower(d.confidence)

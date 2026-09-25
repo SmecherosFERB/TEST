@@ -140,6 +140,18 @@ def earnings_surprise_series(quarters: list[dict[str, Any]] | None, index: pd.Da
     return out
 
 
+def revision_signal(trend: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Reviziile estimărilor analiștilor prezic randamentele (Chan, Jegadeesh și Lakonishok, 1996).
+    O revizie medie în sus de 3% (jumătate pe 30, jumătate pe 90 de zile) = +100."""
+    if not trend:
+        return None
+    parts = [0.5 * (r["current"] / r["30_days_ago"] - 1) + 0.5 * (r["current"] / r["90_days_ago"] - 1) for r in trend.values()]
+    if not parts:
+        return None
+    change = float(np.mean(parts))
+    return {"score": 100 * _clip(change / 0.03), "change": round(change, 4), "estimates": trend}
+
+
 def insider_signal(trades: list[dict[str, Any]] | None, as_of: date, days: int = 180) -> dict[str, Any] | None:
     """Cumpărările pe piață ale mai multor insideri sunt semnalul informativ; vânzările sunt adesea de rutină."""
     if trades is None:
