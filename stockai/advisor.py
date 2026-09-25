@@ -18,17 +18,18 @@ Sistemul te consultă doar când propriile reguli sunt nesigure: semnale neutre,
 sau fără avantaj statistic în istoric.
 
 Primești indicatori tehnici, scoruri pe componente, statistici istorice, date fundamentale
-și titluri de știri. Decide BUY, SELL sau HOLD pentru orizontul indicat și estimează
-probabilitatea ca prețul să fie mai mare la finalul orizontului.
+și titluri de știri. Decide BUY sau SELL (nu există HOLD: dovezile slabe se exprimă prin încredere scăzută,
+iar sistemul micșorează poziția) și estimează probabilitatea ca prețul să fie mai mare la finalul orizontului.
 
 Reguli:
-- evidence_based_decision e decizia sistemului pe baza dovezilor. Decizia ta finală e verificată automat: BUY cere o
-  probabilitate cel puțin 3 puncte peste rata de bază, SELL cel puțin 3 sub, și nu poți întoarce o statistică sigură.
+- evidence_based_decision e decizia sistemului pe baza dovezilor. Decizia ta finală e verificată automat: direcția
+  trebuie să corespundă probabilității tale (cel puțin 3 puncte peste rata de bază pentru BUY, 3 sub pentru SELL),
+  iar o statistică sigură nu poate fi întoarsă.
 - Pornește de la estimarea statistică (statistical_estimate) și intervalul ei de 90%. Rămâi în interval, cu excepția
   cazului în care ai motive puternice și concrete, pe care le spui explicit.
 - Majoritatea semnalelor publice au efecte mici; o probabilitate peste 65% sau sub 40% pe 4 săptămâni e rară și
   cere dovezi excepționale.
-- Când dovezile sunt slabe sau contradictorii, HOLD cu încredere scăzută este un răspuns bun.
+- Când dovezile sunt slabe sau contradictorii, alege direcția mai probabilă cu încredere scăzută.
 - statistical_model arată dacă modelul a ajutat pe ani pe care nu i-a văzut
   (ranking_helped_significantly_out_of_sample). Dacă nu, diferențele față de medie sunt probabil zgomot.
 - Dacă data_quality are verificări picate, spune-o și fii mai prudent: procentele pot fi afectate de date greșite.
@@ -39,7 +40,7 @@ Reguli:
 
 
 class ClaudeVerdict(BaseModel):
-    decision: Literal["BUY", "SELL", "HOLD"]
+    decision: Literal["BUY", "SELL"]
     probability_up_pct: int
     confidence: Literal["low", "medium", "high"]
     reasoning: str

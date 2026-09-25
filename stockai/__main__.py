@@ -20,7 +20,7 @@ from .config import Settings
 from .data import DataError, MarketData
 from .universe import load_universe
 
-CONFIDENCE = {"low": "scăzută", "medium": "medie", "high": "ridicată"}
+CONFIDENCE = {"none": "niciuna", "low": "scăzută", "medium": "medie", "high": "ridicată"}
 SCORE_LABELS = [
     ("technical", "tehnic"),
     ("fundamental", "fundamental"),
@@ -43,10 +43,14 @@ def fmt_score(value: float | None) -> str:
 
 def render(rec: Recommendation) -> str:
     s = rec.scores
+    size = rec.final.size if rec.final else None
+    position = ("" if size is None else " · fără poziție (niciun avantaj dovedit)" if size == 0
+                else f" · poziție sugerată {size:.1%} din portofoliu")
     lines = [
         f"═══ {rec.ticker} · {rec.price:.2f} · {rec.as_of} ═══",
         f"Decizie: {rec.decision}  (decis de {rec.decided_by}"
-        + (f", încredere {CONFIDENCE[rec.confidence]})" if rec.confidence else ")"),
+        + (f", {'convingere' if rec.final else 'încredere'} {CONFIDENCE[rec.confidence]})" if rec.confidence else ")")
+        + position,
     ]
     if rec.final and rec.final.why:
         lines.append("De ce: " + "; ".join(rec.final.why))

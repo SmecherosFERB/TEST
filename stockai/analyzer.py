@@ -86,6 +86,7 @@ class Recommendation:
             "decided_by": self.decided_by,
             "confidence": self.confidence,
             "why": self.final.why if self.final else [],
+            "position_size": self.final.size if self.final else None,
             "rule_decision": self.rule_decision,
             "scores": self.scores,
             "historical_odds": asdict(self.odds) if self.odds else None,
@@ -247,9 +248,9 @@ class Analyzer:
         model_out = self._model_probability(self.model, prices, market_close, quarters)
         beat_out = self._model_probability(self.beat_model, prices, market_close, quarters)
         trade_out = self._model_probability(self.trade_model, prices, market_close, quarters)
+        # Mișcarea tipică pe orizont (o abatere): ținta și stopul trade-ului și baza mărimii poziției.
+        width = float(realized_vol(prices["Close"], 60).iloc[-1] * np.sqrt(s.horizon_days / 252))
         if trade_out:
-            # Ținta și stopul: ±1 abatere tipică pe orizont, de la prețul de azi.
-            width = float(realized_vol(prices["Close"], 60).iloc[-1] * np.sqrt(s.horizon_days / 252))
             price = float(prices["Close"].iloc[-1])
             trade_out["take_profit"], trade_out["stop_loss"] = price * np.exp(width), price * np.exp(-width)
         # Modelul recalibrat pe anii nevăzuți are deja intervalul lui; altfel, istoricul acțiunii tras spre model.
@@ -275,7 +276,8 @@ class Analyzer:
         )
         nxt = extras.get("next_earnings")
         base = base_decision(honest, rule_decision, scores["composite"], s.min_edge, quality.grade,
-                             nxt["days"] if nxt else None, trade_est=model_estimate(trade_out, None))
+                             nxt["days"] if nxt else None, trade_est=model_estimate(trade_out, None),
+                             beat_est=model_estimate(beat_out, None), move=width if np.isfinite(width) else None)
         rec.final = base
         rec.ambiguity_reasons = list(base.ask)
         if base.action != "HOLD":
@@ -354,7 +356,8 @@ class Analyzer:
             "scores_-100_to_100": {k: None if v is None else round(v, 1) for k, v in rec.scores.items()},
             "rule_based_decision": rec.rule_decision,
             "evidence_based_decision": (
-                {"action": rec.final.action, "confidence": rec.final.confidence, "why": rec.final.why}
+                {"action": rec.final.action, "conviction": rec.final.confidence, "position_size": rec.final.size,
+                 "why": rec.final.why}
                 if rec.final else None
             ),
             "historical_odds_technical_only": (

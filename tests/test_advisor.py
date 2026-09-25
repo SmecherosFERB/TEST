@@ -26,7 +26,7 @@ CONTEXT = {
 
 
 def verdict(**overrides):
-    data = dict(decision="HOLD", probability_up_pct=55, confidence="low", reasoning="ok", key_risks=["r"])
+    data = dict(decision="SELL", probability_up_pct=55, confidence="low", reasoning="ok", key_risks=["r"])
     data.update(overrides)
     return ClaudeVerdict(**data)
 
@@ -35,7 +35,7 @@ def test_advise_sends_structured_request_and_returns_verdict():
     client = FakeClient(SimpleNamespace(stop_reason="end_turn", parsed_output=verdict()))
     result = ClaudeAdvisor(model="claude-opus-5", effort="high", client=client).advise(CONTEXT)
 
-    assert result.decision == "HOLD"
+    assert result.decision == "SELL"
     call = client.calls[0]
     assert call["model"] == "claude-opus-5"
     assert call["output_format"] is ClaudeVerdict
