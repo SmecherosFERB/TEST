@@ -1,7 +1,8 @@
 # StockAI
 
-Platformă de analiză a acțiunilor care dă un semnal **BUY / SELL / HOLD** împreună cu
-probabilitățile din spatele lui. Când semnalele nu sunt clare, cere **a doua opinie de la Claude**.
+Platformă de analiză a acțiunilor care dă mereu o decizie **BUY sau SELL**, cu **convingerea**, **mărimea poziției**
+și **cât să ții** acțiunea, plus probabilitățile din spatele lor. Când semnalele nu sunt clare, cere **a doua opinie
+de la Claude**.
 
 > Unealtă de analiză, nu sfat financiar. Decizia și riscul rămân la tine.
 
@@ -11,13 +12,15 @@ probabilitățile din spatele lui. Când semnalele nu sunt clare, cere **a doua 
 prețuri zilnice ──► indicatori ──► scor tehnic ────────┐
 date fundamentale ───────────────► scor fundamental ───┤
 știri + sentiment ───────────────► scor sentiment ─────┤
-rezultate trimestriale ──────────► scor rezultate ─────├─► scor compus ─► BUY / SELL / HOLD
+rezultate trimestriale ──────────► scor rezultate ─────├─► scor compus ─► BUY / SELL
 tranzacțiile insiderilor ────────► scor insideri ──────┤          │
 S&P 500 + macro (VIX, credit) ───► scor piață ─────────┘          │
                                                                   ▼
      procent istoric (situații tehnice similare)  +  model statistic pe ~113 acțiuni (crește? bate S&P 500?)
                                                                   │
                 decizie din dovezi (vezi mai jos) ── neclar? ──► Claude (a doua opinie, cu verificări)
+                                                                  │
+         BUY/SELL · convingere · poziție (% din portofoliu) · cât să ții (1 săpt. – 3 luni) · țintă și stop
 ```
 
 | Componentă | Ce măsoară | Pondere |
@@ -92,33 +95,54 @@ Trei lucruri fac diferența între un procent care arată bine și unul pe care 
    `python -m stockai --evaluate`. Comparăm cu „ca de obicei” (eroarea Brier) și verificăm calibrarea: când
    am spus 60%, a urcat chiar în ~60% din cazuri? De la ~100 de predicții verificate, rezultatele devin de încredere.
 
-### Cum se ia decizia BUY / SELL / HOLD
+### Cum se ia decizia: doar BUY sau SELL
 
-Decizia pornește de la dovezi verificate, nu de la un scor cu ponderi alese de mână (`stockai/decision.py`, aceeași
-logică și în pagină):
+Nu există HOLD. Ca la un desk de trading, fiecare acțiune primește o **direcție**, iar forța dovezilor decide **cât**
+cumperi sau vinzi (`stockai/decision.py`, aceeași logică și în pagină). Un semnal slab nu devine „așteaptă”, ci o
+poziție mică sau zero.
 
-| Statistica (estimarea verificată) | Regulile (scorul compus) | Decizia | Claude |
-|---|---|---|---|
-| sigur peste medie (tot intervalul de 90% peste rata obișnuită) | BUY sau neutre | **BUY** (încredere ridicată dacă regulile sunt de acord) | nu |
-| sigur peste medie | SELL | HOLD | da: arbitrează conflictul |
-| sigur sub medie | SELL sau neutre | **SELL** | nu |
-| înclină într-o parte, dar intervalul include media | de acord | HOLD | da |
-| fără avantaj | semnal puternic (peste ±40) | HOLD | da |
-| fără avantaj | neutre | HOLD, decizie clară | nu |
+| Statistica (estimarea verificată) | Regulile (scorul compus) | Decizia | Convingerea | Claude |
+|---|---|---|---|---|
+| sigur peste medie (tot intervalul de 90% peste rata obișnuită) | BUY | **BUY** | ridicată (medie dacă marja e sub 2 puncte) | nu |
+| sigur peste medie | neutre | **BUY** | medie | nu |
+| sigur peste medie | SELL | **BUY** | scăzută | da: arbitrează conflictul |
+| sigur sub medie | SELL / neutre / BUY | **SELL** | ridicată / medie / scăzută | doar la conflict |
+| înclină într-o parte, dar intervalul include media | oricare | direcția statisticii | scăzută | dacă regulile au o părere |
+| fără avantaj | oricare | direcția o dau, pe rând: „bate S&P 500”, trade-ul, regulile | niciuna (poziție 0) | la semnal puternic (±40) |
 
-- **Al doilea filtru („meta-labeling”):** dacă modelul „Trade” spune sigur că stopul e mai probabil decât ținta, un
-  BUY devine HOLD; dacă spune sigur că ținta e mai probabilă, încrederea crește.
+- **Mărimea poziției vine din risc:** la convingere ridicată, o mișcare tipică de 4 săptămâni împotriva ta (o abatere
+  standard) te costă ~1% din portofoliu; convingerea medie folosește 60% din asta, cea scăzută 25%, „niciuna” 0.
+  Maximum 10% într-o singură acțiune. O acțiune de două ori mai volatilă primește o poziție de două ori mai mică.
+- **Al doilea filtru („meta-labeling”, López de Prado):** dacă modelul „Trade” spune sigur că stopul e mai probabil
+  decât ținta, convingerea scade un nivel; dacă confirmă, o convingere medie devine ridicată.
 - **„Sigur statistic” cere și un model care a ajutat.** Modelul trebuie să fi ordonat acțiunile sigur mai bine decât
-  întâmplarea în anii de test; altfel nu dă BUY/SELL, oricât de sus ar fi un procent.
-- **Porți de siguranță:** pe date de calitate slabă decizia e HOLD. Încrederea scade înaintea unui raport
-  trimestrial în următoarele 4 săptămâni și când estimarea vine doar din istoricul acțiunii.
+  întâmplarea în anii de test; altfel convingerea nu trece de „scăzută”, oricât de sus ar fi un procent.
+- **Porți de siguranță:** pe date de calitate slabă convingerea e „niciuna” (poziție 0). Convingerea scade un nivel
+  înaintea unui raport trimestrial în următoarele 4 săptămâni și când estimarea vine doar din istoricul acțiunii.
 - **Verificările lui Claude:** decizia lui trebuie să se potrivească cu propria probabilitate (BUY cere cel puțin
   3 puncte peste rata obișnuită, SELL cel puțin 3 sub). Nu poate întoarce o statistică sigură. Dacă probabilitatea lui
-  iese mult din intervalul statistic, încrederea devine scăzută. Iar dacă, după cel puțin 30 de predicții verificate,
+  iese mult din intervalul statistic, convingerea devine scăzută. Iar dacă, după cel puțin 30 de predicții verificate,
   a greșit mai des decât statistica, decide statistica.
 - **Regula e testată:** pentru fiecare an, deciziile se iau doar cu ce se știa înainte, și raportul arată cât de des
-  a avut dreptate un BUY sau un SELL față de media acțiunilor din aceleași luni. Pe date fără semnal, regula nu dă
-  niciun BUY/SELL.
+  a avut dreptate un BUY sau un SELL cu convingere față de media acțiunilor din aceleași luni. Pe date fără semnal,
+  regula nu dă nicio poziție.
+
+### Cât să ții
+
+Separat de decizie, **cât timp să ții** acțiunea vine din cinci modele „crește?”, câte unul pe orizont: o săptămână,
+două săptămâni, o lună, două luni, trei luni (`python -m stockai --train --all-horizons`). Pentru direcția aleasă,
+câștigă orizontul cu cel mai mare avantaj raportat la timp (avantaj × √(20 / zile)): un avantaj de 5 puncte într-o
+săptămână valorează mai mult decât unul de 6 puncte în trei luni, pentru că banii se pot refolosi. Planul are și o
+**țintă** și un **stop** (o abatere tipică pe acel orizont): ieși mai devreme dacă prețul atinge una dintre ele.
+„Estimare slabă” înseamnă că modelul acelui orizont nu a ajutat sigur în anii de test.
+
+### Testul de profit
+
+Raportul de antrenare (orizontul de 20 de zile) include un test ca la o firmă de trading: în fiecare lună din anii
+nevăzuți cumpără cele mai bune 20% acțiuni după model (predicții făcute doar din anii dinainte), cu 0,2% costuri pe
+lună, și compară cu S&P 500. Arată randamentul anual, raportul Sharpe, cea mai mare scădere și în câte luni a bătut
+piața, plus varianta long–short (cele mai bune minus cele mai slabe 20%, 0,4% costuri), care nu depinde de direcția
+pieței. Pe date sintetice fără semnal, long–short pierde exact costurile; cu un trend real, câștigă.
 
 Claude primește tot: indicatori, scoruri, decizia bazată pe dovezi, statistica, modelul, calitatea datelor,
 rezultate, insideri, trendul pieței, macro, fundamentale, știri și data următorului raport trimestrial. Răspunde
@@ -153,6 +177,7 @@ python -m stockai --train                 # descarcă istoricul listei, testeaz�
 python -m stockai --train --limit 30      # doar primele 30 de acțiuni (mai rapid)
 python -m stockai --train --target beat   # al doilea model: șansele de a bate S&P 500
 python -m stockai --train --target trade  # al treilea: ținta atinsă înaintea stopului
+python -m stockai --train --all-horizons  # „cât să ții”: câte un model pe 1, 2, 4, 8 și 12 săptămâni
 python -m stockai AAPL MSFT NVDA          # analiză; Claude doar la semnalele neclare
 python -m stockai AAPL --always-claude    # Claude la fiecare acțiune
 python -m stockai AAPL --no-claude        # fără costuri Claude
@@ -167,7 +192,9 @@ Exemplu de rezultat:
 
 ```
 ═══ AAPL · 337.02 · 2026-09-23 ═══
-Decizie: HOLD  (decis de Claude, încredere scăzută)
+Decizie: BUY  (decis de statistică, convingere niciuna) · fără poziție (niciun avantaj dovedit)
+De ce: statistica nu arată un avantaj (58%, interval 55%–61% față de 56% de obicei); direcția o dă modelul „bate S&P 500”; fără poziție
+Cât să ții: o lună (20 zile de bursă) · ieși mai devreme la ținta 358.40 sau la stopul 316.93 · estimare slabă
 Scoruri: tehnic +37 · fundamental +42 · sentiment +18 · rezultate +47 · insideri -20 · piață +55 · compus +34
 Model statistic: 58% șanse de creștere în 20 zile (interval 90%: 55%–61%, de obicei 56%; antrenat pe 113 acțiuni; a ajutat în test: da)
 Model statistic: 54% șanse să bată S&P 500 în 20 zile (interval 90%: 51%–57%, de obicei 51%; antrenat pe 113 acțiuni; a ajutat în test: nu încă)
@@ -213,6 +240,8 @@ rezultate, insideri) și 1 Alpha Vantage (știri). O dată pe zi, pagina cere ș
 - Conectorul Twelve Data nu oferă prețuri ajustate pentru dividende, doar pentru split-uri. Pentru „bate S&P 500”
   diferența e mică (dividendele pe 4 săptămâni sunt ~0,1%), dar randamentele acțiunilor cu dividend mare sunt ușor subestimate.
 - Clasificarea insiderilor din Alpha Vantage e aproximativă (nu are codul tranzacției); SEC EDGAR e exact.
+- Testul de profit folosește companiile mari de azi, deci randamentul absolut e prea optimist; diferența față de
+  S&P 500 și varianta long–short sunt măsurile mai cinstite. Costurile reale pot fi mai mari la acțiuni mai mici.
 - Procentele descriu trecutul. Nu garantează nimic despre viitor.
 
 ## Structura proiectului
@@ -230,7 +259,7 @@ stockai/
   quality.py       calitatea datelor: split-uri, date vechi, goluri, lichiditate, bare incomplete
   model.py         modelul de probabilitate și testul walk-forward
   advisor.py       Claude: cerere cu output structurat și fallback automat la refuz
-  decision.py      decizia BUY / SELL / HOLD din dovezi, porți de siguranță, verificările lui Claude
+  decision.py      decizia BUY / SELL cu convingere și poziție, cât să ții, verificările lui Claude
   analyzer.py      orchestrare
   universe.py      lista de ~115 acțiuni (universe.json)
   __main__.py      linia de comandă
@@ -245,7 +274,7 @@ python -m pytest
 
 ## Ce urmează
 
-- [ ] Backtest de portofoliu: randament, pierdere maximă, comparat cu S&P 500
+- [x] Backtest de portofoliu: randament, pierdere maximă, comparat cu S&P 500
 - [ ] Short interest (FINRA) în model
 - [ ] Grafice cu lumânări (TradingView Lightweight Charts)
 - [ ] Alerte pe email sau Telegram la semnale puternice

@@ -199,3 +199,23 @@ def test_trade_target_builds_a_dataset():
     prices, market = momentum_world(n_stocks=3, n_days=1200)
     data = build_dataset(prices, market, horizon=20, target="trade")
     assert data["label"].isin([0.0, 1.0]).all() and 0.2 < data["label"].mean() < 0.8
+
+
+def test_profit_test_beats_the_market_on_signal_and_not_on_noise():
+    from stockai.model import strategy_backtest
+
+    prices, market = momentum_world()
+    rep = walk_forward(build_dataset(prices, market, horizon=20), horizon=20, min_train_years=3)
+    s = rep.strategy
+    assert s and s["months"] >= 24
+    # trendul simulat e real: cele mai bune acțiuni după model bat cele mai slabe, după costuri
+    assert s["ls"]["annual"] > 0.05 and s["ls"]["sharpe"] > 0.5
+    assert s["long"]["max_drawdown"] <= 0 and 0 <= s["beat_rate"] <= 1
+    assert "Test de profit" in rep.render()
+
+    rng = np.random.default_rng(1)
+    n, months = 40 * 60, np.repeat([f"{2015 + k // 12}-{k % 12 + 1:02d}" for k in range(60)], 40)
+    noise = strategy_backtest(rng.random(n), rng.normal(0.01, 0.08, n), np.repeat(rng.normal(0.01, 0.04, 60), 40), months)
+    # pe zgomot, long–short pierde exact costurile, cu variație
+    assert noise["ls"]["annual"] < 0.03
+    assert strategy_backtest(rng.random(100), rng.normal(0, 0.05, 100), np.zeros(100), months[:100]) is None

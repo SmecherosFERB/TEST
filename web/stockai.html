@@ -483,6 +483,7 @@ td .hint { color: var(--muted); }
 .checks .g[data-ok="1"] { color: var(--buy); }
 .checks .g[data-ok="0"] { color: var(--sell); }
 .checks small { grid-column: 2; color: var(--muted); font-size: 13px; }
+tr.best td { font-weight: 600; }
 .why-line { grid-column: 1 / -1; font-size: 14px; color: var(--ink-2); max-width: 90ch; }
 .why-line strong { color: var(--ink); }
 .warn { grid-column: 1 / -1; padding: 8px 12px; border-radius: 8px; background: var(--hold-soft); color: var(--ink); font-size: 14px; }
@@ -707,7 +708,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
   const fin = (x) => typeof x === "number" && Number.isFinite(x);
   const num = (x) => { const v = parseFloat(x); return Number.isFinite(v) ? v : null; };
   const pct = (x, d = 0) => (fin(x) ? `${(x * 100).toFixed(d)}%` : "n/a");
-  const spct = (x, d = 1) => (fin(x) ? `${x >= 0 ? "+" : "−"}${Math.abs(x * 100).toFixed(d)}%` : "n/a");
+  const spct = (x, d = 1) => (fin(x) ? `${x >= 0 ? "+" : "−"}${Math.abs(x * 100).toFixed(d).replace(".", ",")}%` : "n/a");
   const sscore = (x) => (fin(x) ? `${x >= 0 ? "+" : "−"}${Math.abs(Math.round(x))}` : "n/a");
   const money = (x) => (fin(x) ? x.toLocaleString("ro-RO", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "n/a");
   const fmtDate = (iso) => { const [y, m, d] = iso.split("-").map(Number); return `${d} ${MONTHS[m - 1]} ${y}`; };
@@ -1536,8 +1537,10 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
   // (Daniel și Moskowitz), de aceea are un termen separat pentru acel caz.
   // Modelul e o regresie logistică cu penalizare, verificată an cu an doar pe ani pe care nu i-a văzut,
   // iar procentele afișate sunt recalibrate pe acele rezultate (dacă modelul nu a ajutat, ele rămân la medie).
-  const TV = 3;       // versiunea datelor de antrenare; o schimbare cere o nouă scanare
+  const TV = 4;       // versiunea datelor de antrenare; o schimbare cere o nouă scanare
   const HZ = 20;      // orizontul: 20 de zile de tranzacționare
+  // Orizonturile pentru „cât să ții”: o săptămână, două, o lună, două, trei (zile de tranzacționare).
+  const HOLD_H = [5, 10, 20, 40, 60];
   const LOOK = 252;   // fiecare observație are nevoie de un an de istoric
   const RAW_N = 17;
   const MODEL_MIN_STOCKS = 15;
@@ -1659,13 +1662,14 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
   // Trade-ul cu trei bariere (López de Prado): intrare la închiderea de a doua zi, țintă la +1 abatere tipică pentru
   // 4 săptămâni, stop la −1, ieșire după 20 de zile. 1 = ținta atinsă prima (sau câștig la final), 0 = stopul primul.
   const barrierOf = (raw) => raw[3] * Math.sqrt(HZ / 252);
+  // Întoarce rezultatul și în câte zile s-a închis trade-ul (ținta, stopul sau finalul celor 20 de zile).
   function tradeLabel(c, e0, e1, width) {
     for (let k = e0 + 1; k <= e1; k++) {
       const r = Math.log(c[k] / c[e0]);
-      if (r >= width) return 1;
-      if (r <= -width) return 0;
+      if (r >= width) return [1, k - e0];
+      if (r <= -width) return [0, k - e0];
     }
-    return c[e1] > c[e0] ? 1 : 0;
+    return [c[e1] > c[e0] ? 1 : 0, e1 - e0];
   }
 
   // Observațiile din trecut (cele mai recente primele) și semnalele de azi.
@@ -1675,8 +1679,9 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     const near = (j, iso) => spyNear(spy, j, iso);
     const jAt = (iso) => idxOnOrBefore(spy.d, iso);
     const now = rawNow(bars, ind, spy, sc);
-    const d = [], x = [];
-    let up = "", bt = "", tb = "";
+    const d = [], x = [], r = [], mr = [];
+    let up = "", bt = "", tb = "", tt = "";
+    const hz = Object.fromEntries(HOLD_H.filter((h) => h !== HZ).map((h) => [h, ""]));
     // Semnalul se calculează la închiderea zilei i; intrarea realistă e la închiderea următoare (i + 1),
     // ieșirea după încă HZ zile. Așa nu câștigăm pe hârtie o zi pe care n-am fi putut-o tranzacționa.
     for (let i = n - 2 - HZ; i >= LOOK; i -= HZ) {
@@ -1689,11 +1694,17 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       const ret = c[e1] / c[e0] - 1, mret = spy.c[j1] / spy.c[j0] - 1;
       d.push(bars[i].d);
       x.push(xi);
+      r.push(Math.round(ret * 1e4) / 1e4);
+      mr.push(Math.round(mret * 1e4) / 1e4);
       up += ret > 0 ? "1" : "0";
       bt += ret > mret ? "1" : "0";
-      tb += String(tradeLabel(c, e0, e1, barrierOf(xi)));
+      const [win, days] = tradeLabel(c, e0, e1, barrierOf(xi));
+      tb += String(win);
+      tt += days.toString(36);
+      // Aceeași zi de intrare, alte durate de ținere; „.” când rezultatul nu e încă cunoscut.
+      for (const h of Object.keys(hz)) hz[h] += e0 + Number(h) < n ? (c[e0 + Number(h)] > c[e0] ? "1" : "0") : ".";
     }
-    return { now, d, x, up, bt, tb };
+    return { now, d, x, up, bt, tb, tt, r, mr, ...Object.fromEntries(Object.entries(hz).map(([h, v]) => [`h${h}`, v])) };
   }
 
   const FEAT = [
@@ -1797,11 +1808,13 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
   }
 
   // Pentru fiecare an: învață doar din anii dinainte (fără ultima lună, ale cărei rezultate cad în anul testat).
-  function walkForward(rows) {
+  // Data de la care rezultatele observațiilor ar cădea deja în anul testat (orizontul + o marjă, în zile calendaristice).
+  const purgeCut = (Y, hz) => new Date(Date.UTC(Y, 0, 1) - (Math.ceil(hz * 1.5) + 6) * 864e5).toISOString().slice(0, 10);
+  function walkForward(rows, hz = HZ) {
     const years = [...new Set(rows.map((r) => Number(r.d.slice(0, 4))))].sort((a, b) => a - b);
     const oos = [], perYear = [];
     for (const Y of years.slice(3)) {
-      const cut = `${Y - 1}-11-26`, tag = String(Y);
+      const cut = purgeCut(Y, hz), tag = String(Y);
       const train = rows.filter((r) => r.d < cut), test = rows.filter((r) => r.d.startsWith(tag));
       if (train.length < 400 || test.length < 20) continue;
       const m = trainModel(train);
@@ -1809,7 +1822,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       const yearPreds = [];
       for (const r of test) {
         const p = m.predict(r.f);
-        oos.push({ p, y: r.y, b: m.base, d: r.d });
+        oos.push({ p, y: r.y, b: m.base, d: r.d, r: r.r, mr: r.mr });
         yearPreds.push({ p, y: r.y });
         bs += (p - r.y) ** 2;
         bb += (m.base - r.y) ** 2;
@@ -1887,19 +1900,56 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     return out;
   }
 
+  // Testul de profit, ca la o firmă de trading: în fiecare lună din anii nevăzuți, cumpără cele mai bune 20% acțiuni
+  // după model (cu predicții făcute doar din anii dinainte), plătind 0,2% pe lună costuri; comparăm cu S&P 500 și cu
+  // varianta long–short (cele mai bune minus cele mai slabe 20%, 0,4% costuri). Lista conține companiile mari de azi,
+  // așa că randamentul absolut e prea optimist; diferența față de S&P 500 și long–short sunt măsurile mai cinstite.
+  const COST_LONG = 0.002, COST_LS = 0.004;
+  function strategyBacktest(oos) {
+    const byMonth = new Map();
+    for (const o of oos) {
+      if (!fin(o.r) || !fin(o.mr)) continue;
+      const k = o.d.slice(0, 7);
+      if (!byMonth.has(k)) byMonth.set(k, []);
+      byMonth.get(k).push(o);
+    }
+    const months = [];
+    for (const [k, list] of [...byMonth.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+      if (list.length < 10) continue;
+      const sorted = list.slice().sort((a, b) => b.p - a.p), q = Math.max(2, Math.floor(list.length / 5));
+      const top = sorted.slice(0, q), bottom = sorted.slice(-q);
+      const long = mean(top.map((o) => o.r)) - COST_LONG, spx = mean(list.map((o) => o.mr));
+      months.push({ m: k, long, spx, ls: mean(top.map((o) => o.r)) - mean(bottom.map((o) => o.r)) - COST_LS });
+    }
+    if (months.length < 24) return null;
+    const stats = (xs) => {
+      let eq = 1, peak = 1, dd = 0;
+      const curve = xs.map((x) => { eq *= 1 + x; peak = Math.max(peak, eq); dd = Math.min(dd, eq / peak - 1); return eq; });
+      const m = mean(xs), sd = Math.sqrt(mean(xs.map((x) => (x - m) ** 2)));
+      return { annual: eq ** (12 / xs.length) - 1, sharpe: sd > 0 ? (m / sd) * Math.sqrt(12) : 0, maxDD: dd, curve, total: eq - 1 };
+    };
+    const years = [...new Set(months.map((x) => x.m.slice(0, 4)))].map((y) => {
+      const ms = months.filter((x) => x.m.startsWith(y)), g = (key) => ms.reduce((acc, x) => acc * (1 + x[key]), 1) - 1;
+      return { year: y, long: g("long"), spx: g("spx"), ls: g("ls") };
+    });
+    return { months, long: stats(months.map((x) => x.long)), spx: stats(months.map((x) => x.spx)), ls: stats(months.map((x) => x.ls)),
+      beatRate: mean(months.map((x) => (x.long > x.spx ? 1 : 0))), years };
+  }
+
   // Test al regulii de decizie, fără privit înainte: pentru fiecare an, recalibrarea și rata „de obicei” vin doar din
   // anii de test anteriori; BUY dacă tot intervalul e peste medie, SELL dacă e tot sub. Cât de des au avut dreptate?
   // Comparăm și cu media din aceleași luni: altfel un BUY dat într-o lună bună pentru toată piața ar părea talent.
-  function decisionBacktest(oos) {
+  function decisionBacktest(oos, ov = 1, hz = HZ) {
     const years = [...new Set(oos.map((o) => o.d.slice(0, 4)))].sort();
     const monthUp = new Map();
     for (const o of oos) { const k = o.d.slice(0, 7), v = monthUp.get(k) || [0, 0]; v[0] += o.y; v[1]++; monthUp.set(k, v); }
     const sameMonth = (o) => { const v = monthUp.get(o.d.slice(0, 7)); return v[0] / v[1]; };
     const out = { buy: 0, buyHit: 0, buyBase: 0, sell: 0, sellHit: 0, sellBase: 0, hold: 0, total: 0, up: 0 };
     for (const Y of years.slice(1)) {
-      const past = oos.filter((o) => o.d.slice(0, 4) < Y), now = oos.filter((o) => o.d.slice(0, 4) === Y);
+      const cut = purgeCut(Number(Y), hz);
+      const past = oos.filter((o) => o.d < cut), now = oos.filter((o) => o.d.slice(0, 4) === Y);
       if (past.length < 200) continue;
-      const cal = platt(past, designEffect(past)), base = mean(past.map((o) => o.y)), helps = calHelps(cal);
+      const cal = platt(past, designEffect(past) * ov), base = mean(past.map((o) => o.y)), helps = calHelps(cal);
       for (const o of now) {
         const c = calibrate(cal, o.p);
         out.total++; out.up += o.y;
@@ -1915,13 +1965,14 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
   function buildModel(docs, target) {
     const rows = [], stocks = new Set();
     for (const doc of docs) {
-      const lab = target === "beat" ? doc.bt : target === "trade" ? doc.tb : doc.up;
+      const lab = target === "beat" ? doc.bt : target === "trade" ? doc.tb : target === "up" ? doc.up : doc[target];
       if (!doc || doc.tv !== TV || !Array.isArray(doc.d) || !Array.isArray(doc.x) || typeof lab !== "string") continue;
       let any = false;
       for (let k = 0; k < doc.d.length; k++) {
         const r = doc.x[k], l = lab[k], d = doc.d[k];
         if (!Array.isArray(r) || r.length !== RAW_N || !r.every(fin) || (l !== "0" && l !== "1") || typeof d !== "string") continue;
-        rows.push({ d, f: design(r), y: l === "1" ? 1 : 0 });
+        rows.push({ d, f: design(r), y: l === "1" ? 1 : 0, r: Array.isArray(doc.r) && fin(doc.r[k]) ? doc.r[k] : null,
+          mr: Array.isArray(doc.mr) && fin(doc.mr[k]) ? doc.mr[k] : null });
         any = true;
       }
       if (any) stocks.add(doc.ticker);
@@ -1929,9 +1980,12 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     const info = { target, ready: false, stocks: stocks.size, rows: rows.length };
     if (stocks.size < MODEL_MIN_STOCKS || rows.length < 1000) return info;
     rows.sort((a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : 0));
-    const wf = walkForward(rows);
+    const hz = Number(String(target).replace(/^h/, "")) || HZ;
+    const wf = walkForward(rows, hz);
     if (wf.oos.length < 300 || wf.perYear.length < 3) return info;
-    const deff = designEffect(wf.oos);
+    // Ferestrele de 40 sau 60 de zile se suprapun între observațiile aceleiași acțiuni (luate din 20 în 20 de zile).
+    const ov = Math.max(1, hz / HZ);
+    const deff = designEffect(wf.oos) * ov;
     const cal = platt(wf.oos, deff);
     const brier = mean(wf.oos.map((o) => (o.p - o.y) ** 2)), brierBase = mean(wf.oos.map((o) => (o.b - o.y) ** 2));
     const final = trainModel(rows);
@@ -1939,7 +1993,8 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     return {
       ...info,
       ready: true,
-      decisions: decisionBacktest(wf.oos),
+      decisions: decisionBacktest(wf.oos, ov, hz),
+      pnl: hz === HZ ? strategyBacktest(wf.oos) : null,
       final, cal, deff,
       n: wf.oos.length,
       nEff: wf.oos.length / deff,
@@ -1966,6 +2021,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     return { ...c, base: m.overall, edge: c.p - m.overall, sure };
   }
   /* model-core:end */
+  const lcFirst = (s) => s.charAt(0).toLowerCase() + s.slice(1);
   const TARGETS = {
     up: { label: "Crește", what: "șanse de creștere", verb: "au urcat", base: "au urcat" },
     beat: { label: "Bate S&P 500", what: "șanse să bată S&P 500", verb: "au bătut S&P 500", base: "au bătut S&P 500" },
@@ -1975,7 +2031,30 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
   // Ținta și stopul unui trade: ±1 abatere tipică pe 4 săptămâni, de la prețul de azi.
   const tradeLevels = (raw, price) => { const w = barrierOf(raw); return { w, tp: price * Math.exp(w), sl: price * Math.exp(-w) }; };
   const trainDocs = new Map();
-  const models = { up: null, beat: null, trade: null };
+  const models = { up: null, beat: null, trade: null, h5: null, h10: null, h40: null, h60: null };
+  let exitStats = null; // în câte zile se închide de obicei trade-ul cu țintă și stop
+  const HOLD_LABEL = { 5: "o săptămână", 10: "două săptămâni", 20: "o lună", 40: "două luni", 60: "trei luni" };
+  const holdModel = (h) => (h === HZ ? models.up : models[`h${h}`]);
+  // Cât să ții: la fiecare orizont, cât de departe e probabilitatea de medie în direcția deciziei, raportat la timp
+  // (un avantaj pe 3 luni valorează mai puțin pe unitate de timp decât același avantaj pe o lună).
+  function holdingPlan(x, dir, price) {
+    if (!Array.isArray(x)) return null;
+    const rows = [];
+    for (const h of HOLD_H) {
+      const m = holdModel(h), e = modelPredict(m, x);
+      if (!e) continue;
+      const edge = dir === "BUY" ? e.p - e.base : e.base - e.p, low = dir === "BUY" ? e.lo - e.base : e.base - e.hi;
+      rows.push({ h, p: e.p, lo: e.lo, hi: e.hi, base: e.base, edge, sure: modelHelps(m) && low > 0, score: edge * Math.sqrt(HZ / h) });
+    }
+    if (rows.length < 2) return null;
+    // Fără un avantaj de cel puțin jumătate de punct pe vreun orizont, rămâne orizontul standard al deciziei (o lună).
+    const withEdge = rows.filter((r) => r.edge >= 0.005);
+    const noEdge = !withEdge.length;
+    const best = noEdge ? rows.find((r) => r.h === HZ) || rows[0] : withEdge.reduce((a, b) => (b.score > a.score ? b : a));
+    const w = x[3] * Math.sqrt(best.h / 252);
+    const [tp, sl] = dir === "BUY" ? [price * Math.exp(w), price * Math.exp(-w)] : [price * Math.exp(-w), price * Math.exp(w)];
+    return { rows, best, tp, sl, w, noEdge };
+  }
   let modelTimer = null, modelSig = "", trainReady = false;
   let spyData = null;
   let target = ["beat", "trade"].includes(store.get(K.target)) ? store.get(K.target) : "up";
@@ -2002,7 +2081,9 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       if (sig === modelSig) return;
       modelSig = sig;
       // Câte un model pe rând, cu pauză între ele, ca pagina să rămână fluidă.
-      const queue = [...TARGET_KEYS];
+      const queue = [...TARGET_KEYS, ...HOLD_H.filter((h) => h !== HZ).map((h) => `h${h}`)];
+      const days = docs.flatMap((d) => (typeof d.tt === "string" ? [...d.tt].map((ch) => parseInt(ch, 36)).filter((k) => k > 0) : [])).sort((a, b) => a - b);
+      exitStats = days.length >= 200 ? { median: days[Math.floor(days.length / 2)], n: days.length } : null;
       const step = () => {
         const k = queue.shift();
         if (!k) { renderRanking(); renderDirectory(); refreshDetailModel(); return; }
@@ -2095,7 +2176,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       const order = [["statistica", edgeOf(est)], ["modelul „bate S&P 500”", edgeOf(beat)], ["trade-ul cu țintă și stop", edgeOf(trade)], ["regulile", composite / 1000]];
       const [src, val] = order.find(([name, v]) => Math.abs(v) >= 0.005 || name === "regulile");
       d = val >= 0 ? "BUY" : "SELL";
-      why.push(`statistica nu arată un avantaj (${pct(est.p)}, interval ${iv}); direcția o dă ${src}; fără poziție`);
+      why.push(`statistica nu arată un avantaj (${pct(est.p)}, interval ${iv}); direcția o ${src === "regulile" ? "dau" : "dă"} ${src}; fără poziție`);
       if (Math.abs(composite) >= STRONG_RULE) ask.push(`regulile dau un semnal puternic (${sscore(composite)}), dar statistica nu arată niciun avantaj (${iv})`);
     }
     // Al doilea filtru („meta-labeling”, López de Prado): trade-ul cu țintă și stop confirmă sau slăbește direcția.
@@ -2319,7 +2400,10 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     if (f.key === "D" && spyData && !etf(t) && q.grade !== "slabă") {
       const td = trainingData(weeks, ind, spyData, q.suspect);
       if (td.now) { rec.x = td.now; rec.tv = TV; }
-      if (td.d.length >= 24) train = { ticker: t, tv: TV, last: weeks[i].d, d: td.d, x: td.x, up: td.up, bt: td.bt };
+      if (td.d.length >= 24) {
+        train = { ticker: t, tv: TV, last: weeks[i].d, d: td.d, x: td.x, up: td.up, bt: td.bt, tb: td.tb, tt: td.tt, r: td.r, mr: td.mr };
+        for (const h of HOLD_H) if (h !== HZ) train[`h${h}`] = td[`h${h}`];
+      }
     }
     return { rec, train };
   }
@@ -2353,6 +2437,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       by: fd.by,
       conf: fd.conf,
       size: fd.size,
+      hold: (() => { const plan = holdingPlan(a.x, fd.d, entry.weeks[a.i].c); return plan ? plan.best.h : null; })(),
       composite: r1(a.scores.composite),
       claudeProb: fd.v && fin(fd.v.probability_up_pct) ? fd.v.probability_up_pct : null,
     };
@@ -2675,6 +2760,11 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
         return { take_profit: r2(lv.tp), stop_loss: r2(lv.sl), horizon_days: HZ, prob_target_first: r4(a.model.trade.p),
           interval_90: [r4(a.model.trade.lo), r4(a.model.trade.hi)], base_rate: r4(a.model.trade.base) };
       })() : null,
+      holding_plan: (() => {
+        const plan = holdingPlan(a.x, a.decision.d, ind.c[i]);
+        return plan ? { recommended_days: plan.best.h, take_profit: r2(plan.tp), stop_loss: r2(plan.sl),
+          per_horizon: plan.rows.map((r) => ({ days: r.h, prob_up: r4(r.p), base_rate: r4(r.base), sure: r.sure })) } : null;
+      })(),
       prob_beat_sp500: a.model.beat ? {
         prob: r4(a.model.beat.p),
         interval_90: [r4(a.model.beat.lo), r4(a.model.beat.hi)],
@@ -2863,7 +2953,8 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       box.replaceChildren(el("span", { text:
         `Testat pe ${yrs}, doar pe ani pe care modelul nu i-a văzut: cele mai bune 20% după model ${tg.verb} în ${pct(top.act)} din cazuri (interval ${pct(top.lo)}–${pct(top.hi)}), cele mai slabe 20% în ${pct(bottom.act)}, media ${pct(m.overall)}. ` +
         (modelHelps(m) ? "Diferența e sigură statistic." : "Diferența nu e încă sigură statistic, așa că procentele rămân aproape de medie.") +
-        (bear && curTarget() === "up" ? " Piața e în scădere: în astfel de perioade urcă mai puține acțiuni, iar „Bate S&P 500” spune mai mult decât „Crește”." : "") }));
+        (bear && curTarget() === "up" ? " Piața e în scădere: în astfel de perioade urcă mai puține acțiuni, iar „Bate S&P 500” spune mai mult decât „Crește”." : "") +
+        (() => { const pm = models.beat && models.beat.ready && models.beat.pnl ? models.beat.pnl : m.pnl; return pm ? ` Test de profit, după costuri: cumpărând lunar cele mai bune 20%, ${spct(pm.long.annual, 1)} pe an față de S&P 500 ${spct(pm.spx.annual, 1)} (detalii în analiza unei acțiuni).` : ""; })() }));
     } else {
       const k = modelStocks(), need = Math.max(1, MODEL_MIN_STOCKS - k);
       box.replaceChildren(el("span", { text: k >= MODEL_MIN_STOCKS
@@ -2922,6 +3013,10 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
           Array.isArray(s.x) && fin(s.x[3]) ? el("span", { class: "card-sub", text: cur === "trade"
             ? `țintă ${money(tradeLevels(s.x, s.price).tp)} · stop ${money(tradeLevels(s.x, s.price).sl)} (±${Math.round((Math.exp(barrierOf(s.x)) - 1) * 100)}%)`
             : `mișcare tipică în 4 săpt.: ±${Math.round(s.x[3] * Math.sqrt(20 / 252) * 100)}%` }) : null,
+          (() => {
+            const plan = Array.isArray(s.x) && s.tv === TV ? holdingPlan(s.x, statAction(scanEstimates(s).up), s.price) : null;
+            return plan ? el("span", { class: "card-sub", text: `ține ~${HOLD_LABEL[plan.best.h]}` }) : null;
+          })(),
           ...(() => {
             const nx = (typeof s.next === "string" && s.next >= today() ? s.next : null) || nextReport(s.ticker);
             return nx && calDays(today(), nx) <= 28 ? [el("span", { class: "card-flag", title: "Prețul poate sări mult în ziua raportului.", text: `raport trimestrial în ${calDays(today(), nx)} zile` })] : [];
@@ -3177,6 +3272,21 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     return withClaude(a.decision, v, a.est, a.quality.grade);
   }
 
+  // „Cât să ții”: orizontul cu cel mai bun avantaj pe unitate de timp, cu ieșire mai devreme la țintă sau stop.
+  function holdKeynum(a, fd, price) {
+    const plan = holdingPlan(a.x, fd.d, price);
+    if (!plan) {
+      const w = a.x ? barrierOf(a.x) : moveOf(state.entry.weeks, a.f);
+      if (!fin(w)) return null;
+      const [tp, sl] = fd.d === "BUY" ? [price * Math.exp(w), price * Math.exp(-w)] : [price * Math.exp(-w), price * Math.exp(w)];
+      return el("div", { class: "keynum" }, el("span", { class: "keynum-label", text: "Cât să ții" }),
+        el("span", { class: "keynum-value" }, "o lună", " ", el("small", { text: `orizontul standard · ieși mai devreme la ținta ${money(tp)} sau la stopul ${money(sl)}` })));
+    }
+    return el("div", { class: "keynum" }, el("span", { class: "keynum-label", text: "Cât să ții" }),
+      el("span", { class: "keynum-value" }, HOLD_LABEL[plan.best.h], " ",
+        el("small", { text: `${plan.best.h} zile de bursă · ieși mai devreme la ținta ${money(plan.tp)} sau la stopul ${money(plan.sl)}${plan.noEdge ? " · niciun orizont nu arată un avantaj" : plan.best.sure ? "" : " · estimare slabă"}` })));
+  }
+
   function renderVerdict(entry, a) {
     const o = entry.overview;
     const fd = finalDecisionFor(entry, a);
@@ -3202,6 +3312,7 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
         el("span", { class: "keynum-label", text: "Șanse de creștere, 4 săptămâni" }),
         el("span", { class: "keynum-value" }, est ? pct(est.p) : "n/a", " ",
           el("small", { text: est ? `interval ${pct(est.lo)}–${pct(est.hi)} · de obicei ${pct(est.base)} · ${est.src === "model" ? "model testat" : "din istoric"}` : "prea puține date" }))),
+      holdKeynum(a, fd, last.c),
       beat ? el("div", { class: "keynum" },
         el("span", { class: "keynum-label", text: "Bate S&P 500, 4 săptămâni" }),
         el("span", { class: "keynum-value" }, pct(beat.p), " ", el("small", { text: `interval ${pct(beat.lo)}–${pct(beat.hi)} · de obicei ${pct(beat.base)}` }))) : null,
@@ -3399,7 +3510,101 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
     const parts = [];
     parts.push(t.buy ? `BUY de ${t.buy} ori: ${what[0]} în ${pct(t.buyHit / t.buy)} (în aceleași luni, media: ${pct(t.buyBase / t.buy)})` : "niciun BUY sigur");
     parts.push(t.sell ? `SELL de ${t.sell} ori: ${what[1]} în ${pct(t.sellHit / t.sell)} (în aceleași luni, media: ${pct(t.sellBase / t.sell)})` : "niciun SELL sigur");
-    return `Regula de decizie pe ani nevăzuți, fiecare an decis doar cu ce se știa înainte (${TARGETS[k].label}): ${parts.join("; ")}; în rest HOLD.`;
+    return `Regula de decizie pe ani nevăzuți, fiecare an decis doar cu ce se știa înainte (${TARGETS[k].label}): ${parts.join("; ")}; în rest fără poziție.`;
+  }
+
+  // Testul de profit: cât ar fi ajuns 10.000 $ investiți lunar în cele mai bune 20% după model, față de S&P 500.
+  function pnlBlock(m, k) {
+    const P = m && m.pnl;
+    if (!P) return null;
+    const START = 10000, n = P.months.length + 1;
+    const series = [
+      { key: "long", name: "Strategia (cele mai bune 20%)", color: "var(--s1)", dash: null, vals: [START, ...P.long.curve.map((v) => v * START)] },
+      { key: "spx", name: "S&P 500", color: "var(--s2)", dash: "7 5", vals: [START, ...P.spx.curve.map((v) => v * START)] },
+    ];
+    const labels = ["start", ...P.months.map((x) => x.m)];
+    const W = 720, H = 260, mg = { l: 64, r: 110, t: 12, b: 28 };
+    const all = series.flatMap((se) => se.vals);
+    let lo = Math.min(...all), hi = Math.max(...all);
+    const pad = (hi - lo) * 0.06 || 1;
+    lo -= pad; hi += pad;
+    const x = (i) => mg.l + (i / Math.max(1, n - 1)) * (W - mg.l - mg.r);
+    const y = (v) => mg.t + (1 - (v - lo) / (hi - lo)) * (H - mg.t - mg.b);
+    const usd0 = (v) => `${Math.round(v).toLocaleString("ro-RO")} $`;
+    const svg = sv("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", tabindex: "0",
+      "aria-label": `Valoarea a 10.000 $: strategia a ajuns la ${usd0(series[0].vals[n - 1])}, S&P 500 la ${usd0(series[1].vals[n - 1])}. Săgețile stânga/dreapta arată lunile.` });
+    for (const t of niceTicks(lo, hi, 5)) {
+      if (t < lo || t > hi) continue;
+      svg.append(sv("line", { x1: mg.l, x2: W - mg.r, y1: y(t), y2: y(t), stroke: "var(--line)", "stroke-width": 1 }));
+      const lab = sv("text", { x: mg.l - 8, y: y(t) + 4, "text-anchor": "end", class: "axis-text" });
+      lab.textContent = t.toLocaleString("ro-RO");
+      svg.append(lab);
+    }
+    labels.forEach((lb, i) => {
+      if (i > 0 && lb.endsWith("-01")) {
+        svg.append(sv("line", { x1: x(i), x2: x(i), y1: H - mg.b, y2: H - mg.b + 4, stroke: "var(--line-strong)" }));
+        const t = sv("text", { x: x(i), y: H - 8, "text-anchor": "middle", class: "axis-text" });
+        t.textContent = lb.slice(0, 4);
+        svg.append(t);
+      }
+    });
+    svg.append(sv("line", { x1: mg.l, x2: W - mg.r, y1: H - mg.b, y2: H - mg.b, stroke: "var(--line-strong)", "stroke-width": 1 }));
+    for (const se of [...series].reverse()) {
+      const d = se.vals.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
+      const path = sv("path", { d, fill: "none", stroke: se.color, "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" });
+      if (se.dash) path.setAttribute("stroke-dasharray", se.dash);
+      svg.append(path);
+    }
+    const ends = series.map((se) => ({ se, v: se.vals[n - 1], y: y(se.vals[n - 1]) })).sort((a, b) => a.y - b.y);
+    for (let j = 1; j < ends.length; j++) if (ends[j].y - ends[j - 1].y < 15) ends[j].y = ends[j - 1].y + 15;
+    for (const e of ends) {
+      svg.append(sv("circle", { cx: x(n - 1), cy: y(e.v), r: 4.5, fill: e.se.color, stroke: "var(--surface)", "stroke-width": 2 }));
+      const t = sv("text", { x: W - mg.r + 10, y: e.y + 4, class: "end-label" });
+      t.textContent = usd0(e.v);
+      svg.append(t);
+    }
+    const cross = sv("line", { y1: mg.t, y2: H - mg.b, stroke: "var(--muted)", "stroke-width": 1, visibility: "hidden" });
+    const dots = series.map((se) => sv("circle", { r: 4, fill: se.color, stroke: "var(--surface)", "stroke-width": 2, visibility: "hidden" }));
+    svg.append(cross, ...dots, sv("rect", { x: mg.l, y: mg.t, width: W - mg.l - mg.r, height: H - mg.t - mg.b, fill: "transparent" }));
+    const wrap = el("div", { class: "chart-wrap" });
+    const tip = el("div", { class: "tip", hidden: true });
+    wrap.append(svg, tip);
+    let cur = null;
+    const show = (i) => {
+      cur = Math.max(0, Math.min(n - 1, i));
+      cross.setAttribute("x1", x(cur)); cross.setAttribute("x2", x(cur)); cross.setAttribute("visibility", "visible");
+      series.forEach((se, j) => { dots[j].setAttribute("cx", x(cur)); dots[j].setAttribute("cy", y(se.vals[cur])); dots[j].setAttribute("visibility", "visible"); });
+      const lb = labels[cur];
+      tip.replaceChildren(el("div", { class: "tip-date", text: lb === "start" ? "început" : `${MONTHS[Number(lb.slice(5, 7)) - 1]} ${lb.slice(0, 4)}` }),
+        ...series.map((se) => el("div", { class: "tip-row" }, swatch(se), se.name, el("strong", { text: usd0(se.vals[cur]) }))));
+      tip.hidden = false;
+      const rect = svg.getBoundingClientRect(), px = (x(cur) / W) * rect.width, tw = tip.offsetWidth;
+      tip.style.left = `${Math.max(0, Math.min(rect.width - tw, px + 12 + tw > rect.width ? px - tw - 12 : px + 12))}px`;
+      tip.style.top = `${(mg.t / H) * rect.height + 4}px`;
+    };
+    const hide = () => { cross.setAttribute("visibility", "hidden"); dots.forEach((d) => d.setAttribute("visibility", "hidden")); tip.hidden = true; };
+    svg.addEventListener("pointermove", (ev) => { const r = svg.getBoundingClientRect(); show(Math.round(((((ev.clientX - r.left) / r.width) * W - mg.l) / (W - mg.l - mg.r)) * (n - 1))); });
+    svg.addEventListener("pointerleave", hide);
+    svg.addEventListener("blur", hide);
+    svg.addEventListener("keydown", (ev) => {
+      if (ev.key === "ArrowLeft" || ev.key === "ArrowRight") { ev.preventDefault(); show((cur ?? n - 1) + (ev.key === "ArrowLeft" ? -1 : 1)); }
+      else if (ev.key === "Escape") hide();
+    });
+    const sgn = (v) => spct(v, 1), num2 = (v) => `${v < 0 ? "−" : ""}${Math.abs(v).toFixed(2).replace(".", ",")}`;
+    const yearRows = P.years.map((yr) => el("tr", null,
+      el("td", { class: "num", text: yr.year }), el("td", { class: "r num", text: sgn(yr.long) }),
+      el("td", { class: "r num", text: sgn(yr.spx) }), el("td", { class: "r num", text: sgn(yr.ls) })));
+    const table = el("table", null,
+      el("thead", null, el("tr", null, el("th", { text: "Anul" }), el("th", { class: "r", text: "Strategia" }),
+        el("th", { class: "r", text: "S&P 500" }), el("th", { class: "r", text: "Long–short" }))),
+      el("tbody", null, yearRows));
+    return el("div", null,
+      el("h3", { text: `Testul de profit (${lcFirst(TARGETS[k].label)}, ani nevăzuți, după costuri)` }),
+      el("p", { class: "note", text: `În fiecare lună, cumpărând cele mai bune 20% acțiuni după model: ${sgn(P.long.annual)} pe an (Sharpe ${num2(P.long.sharpe)}, scădere maximă ${sgn(P.long.maxDD)}), față de S&P 500 ${sgn(P.spx.annual)} pe an (Sharpe ${num2(P.spx.sharpe)}, scădere maximă ${sgn(P.spx.maxDD)}). A bătut S&P 500 în ${pct(P.beatRate)} din luni. Long–short (cele mai bune minus cele mai slabe 20%): ${sgn(P.ls.annual)} pe an, Sharpe ${num2(P.ls.sharpe)}.` }),
+      el("div", { class: "legend" }, series.map((se) => el("span", { class: "legend-item" }, swatch(se), se.name))),
+      wrap,
+      el("details", { class: "data" }, el("summary", { text: "Vezi randamentele pe ani" }), el("div", { class: "table-scroll" }, table)),
+      el("p", { class: "note", text: "Costuri incluse: 0,2% pe lună pentru strategie, 0,4% pentru long–short. Lista conține companiile mari de azi, deci randamentul absolut e prea optimist (survivorship bias); diferența față de S&P 500 și long–short sunt măsurile mai cinstite. Trecutul nu garantează viitorul." }));
   }
 
   // Ce a rămas în afara modelului și de ce (igiena datelor, la vedere).
@@ -3448,6 +3653,19 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
       const move = a.x[3] * Math.sqrt(20 / 252);
       kids.push(el("p", { class: "note", text: `Mișcare tipică în 4 săptămâni: ±${pct(move)} (din volatilitatea ultimelor 60 de zile). Beta față de S&P 500: ${fin(a.x[10]) ? a.x[10].toFixed(2).replace(".", ",") : "n/a"} (1 = se mișcă la fel ca piața, peste 1 = îi amplifică mișcările, sub 1 = le atenuează).` }));
     }
+    const fdNow = finalDecisionFor(state.entry, a);
+    const plan = holdingPlan(a.x, fdNow.d, state.entry.weeks[a.i].c);
+    if (plan) {
+      kids.push(el("div", null,
+        el("h3", { text: `Cât să ții (${fdNow.d})` }),
+        el("div", { class: "table-scroll" }, el("table", null,
+          el("thead", null, el("tr", null, el("th", { text: "Ții" }), el("th", { class: "r", text: "Crește" }), el("th", { class: "r", text: "De obicei" }),
+            el("th", { class: "r", text: `Avantaj ${fdNow.d}` }), el("th", { text: "Sigur" }))),
+          el("tbody", null, plan.rows.map((r) => el("tr", r.h === plan.best.h ? { class: "best" } : null,
+            el("td", { text: `${HOLD_LABEL[r.h]}${r.h === plan.best.h ? " ◀" : ""}` }), el("td", { class: "r num", text: pct(r.p) }),
+            el("td", { class: "r num", text: pct(r.base) }), el("td", { class: "r num", text: `${spct(r.edge, 1).slice(0, -1)} pp` }), el("td", { text: r.sure ? "da" : "nu" })))))),
+        el("p", { class: "note", text: `Recomandat: ${HOLD_LABEL[plan.best.h]} (${plan.best.h} zile de bursă), ${plan.noEdge ? "orizontul standard al deciziei, pentru că niciun orizont nu arată un avantaj" : "orizontul cu cel mai bun avantaj pe unitate de timp"}. Ieși mai devreme dacă prețul atinge ținta ${money(plan.tp)} sau stopul ${money(plan.sl)} (±${pct(Math.exp(plan.w) - 1)}, o abatere tipică pe acest orizont).${exitStats ? ` În trecut, un trade cu țintă și stop la o abatere pe o lună s-a închis de obicei în ${exitStats.median} zile de bursă.` : ""}` })));
+    }
     const tr = (k) => {
       const m = models[k];
       if (!m || !m.ready) return null;
@@ -3470,11 +3688,14 @@ footer { font-size: 12px; color: var(--muted); display: grid; gap: 4px; max-widt
         }).join(" ") + " Un model de încredere ar trebui să ajute în majoritatea anilor, nu doar într-unul bun." }),
         el("p", { class: "note", text: "Procentele de sus sunt recalibrate pe aceste rezultate: dacă ordinea dată de model nu a contat sigur, ele rămân aproape de medie." }),
         el("p", { class: "note", text: TARGET_KEYS.filter((k) => models[k] && models[k].ready && models[k].decisions).map((k) => decisionText(models[k].decisions, k)).join(" ") }))));
+    const pk = models.beat && models.beat.ready && models.beat.pnl ? "beat" : "up";
+    const pb = pnlBlock(models[pk], pk);
+    if (pb) kids.push(pb);
     const mt = models[curTarget()];
     const top = mt.coefs.filter((c) => Math.abs(c.w) >= 0.01).slice(0, 5);
     if (top.length) {
       kids.push(el("div", null,
-        el("h3", { text: `Ce a contat pentru „${TARGETS[curTarget()].label.toLowerCase()}”` }),
+        el("h3", { text: `Ce a contat pentru „${lcFirst(TARGETS[curTarget()].label)}”` }),
         el("ul", { class: "why" }, top.map((c) => el("li", null,
           el("span", { class: "g", "data-p": c.w > 0 ? "pos" : "neg", "aria-hidden": "true", text: c.w > 0 ? "▲" : "▼" }),
           `${c.name[0].toUpperCase()}${c.name.slice(1)}: ${c.w > 0 ? "mai mare = șanse mai mari" : "mai mare = șanse mai mici"}`))),

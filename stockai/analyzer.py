@@ -15,7 +15,7 @@ from .advisor import AdvisorError, ClaudeAdvisor, ClaudeVerdict
 from .calibration import HistoricalOdds, historical_odds, honest_estimate, model_estimate
 from .config import Settings
 from .data import DataError, DataProvider
-from .decision import Decision, base_decision, with_claude
+from .decision import Decision, base_decision, holding_plan, with_claude
 from .indicators import compute_all
 from .quality import check_prices
 from .scoring import (
@@ -178,6 +178,7 @@ class Analyzer:
         beat_model: Any | None = None,
         claude_worse: bool = False,
         trade_model: Any | None = None,
+        hold_models: dict[int, Any] | None = None,
     ) -> None:
         self.data = data
         self.settings = settings or Settings()
@@ -186,6 +187,7 @@ class Analyzer:
         self.model = model
         self.beat_model = beat_model
         self.trade_model = trade_model
+        self.hold_models = hold_models or {}
         # True când, în predicțiile verificate, Claude a greșit mai des decât statistica (vezi track.claude_worse).
         self.claude_worse = claude_worse
 
@@ -280,10 +282,12 @@ class Analyzer:
                              beat_est=model_estimate(beat_out, None), move=width if np.isfinite(width) else None)
         rec.final = base
         rec.ambiguity_reasons = list(base.ask)
-        if base.action != "HOLD":
-            # Când statistica cere o acțiune, componente care se contrazic puternic merită o a doua privire.
+        if base.confidence != "none":
+            # Când statistica cere o poziție, componente care se contrazic puternic merită o a doua privire.
             rec.ambiguity_reasons += [r for r in find_ambiguity(scores, rule_decision, odds, s) if "contrazice" in r]
-        # Pe date slabe decizia e HOLD oricum: nu are rost să-l întrebăm pe Claude.
+        if quality.grade == "slabă":
+            # Pe date slabe poziția e zero oricum: nu are rost să-l întrebăm pe Claude.
+            rec.ambiguity_reasons = []
 
         ask = self.claude_mode == "always" or (self.claude_mode == "auto" and rec.ambiguity_reasons)
         if ask and self.advisor:
@@ -294,6 +298,17 @@ class Analyzer:
                 rec.claude_error = str(exc)
         if rec.claude:
             rec.final = with_claude(base, rec.claude, honest, s.min_edge, quality.grade, self.claude_worse)
+        if self.hold_models:
+            per_h, helps = {}, {}
+            for h, model in self.hold_models.items():
+                out = self._model_probability(model, prices, market_close, quarters)
+                per_h[h] = model_estimate(out, None) if out and out.get("lo") is not None else (
+                    {"p": out["prob"], "base": out["base_rate"], "lo": None, "hi": None} if out else None)
+                helps[h] = bool(out and out.get("helps"))
+            daily = float(realized_vol(prices["Close"], 60).iloc[-1] / np.sqrt(252))
+            plan = holding_plan(per_h, rec.decision, rec.price, daily if np.isfinite(daily) else None, helps, s.horizon_days)
+            if plan:
+                rec.extras["holding"] = plan
         return rec
 
     def _model_probability(

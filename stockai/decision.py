@@ -78,6 +78,36 @@ def _edge(e: dict[str, Any] | None) -> float:
     return (e["p"] - e["base"]) if e else 0.0
 
 
+HOLD_LABEL = {5: "o săptămână", 10: "două săptămâni", 20: "o lună", 40: "două luni", 60: "trei luni"}
+
+
+def holding_plan(per_horizon: dict[int, dict[str, Any]], action: str, price: float, daily_vol: float | None,
+                 helps: dict[int, bool] | None = None, standard_days: int = 20) -> dict[str, Any] | None:
+    """Cât să ții: orizontul cu cel mai bun avantaj în direcția deciziei, raportat la timp (avantaj × √(20/zile)),
+    cu ieșire mai devreme la țintă sau stop (o abatere tipică pe acel orizont)."""
+    rows = []
+    for h, e in sorted(per_horizon.items()):
+        if not e:
+            continue
+        edge = e["p"] - e["base"] if action == "BUY" else e["base"] - e["p"]
+        low = (e["lo"] - e["base"]) if action == "BUY" else (e["base"] - e["hi"])
+        sure = bool((helps or {}).get(h)) and e.get("lo") is not None and low > 0
+        rows.append({"days": h, "prob_up": e["p"], "base": e["base"], "edge": edge, "sure": sure, "score": edge * (20 / h) ** 0.5})
+    if len(rows) < 2:
+        return None
+    # Fără un avantaj de cel puțin jumătate de punct pe vreun orizont, rămâne orizontul standard al deciziei.
+    with_edge = [r for r in rows if r["edge"] >= 0.005]
+    best = (max(with_edge, key=lambda r: r["score"]) if with_edge
+            else next((r for r in rows if r["days"] == standard_days), rows[0]))
+    plan = {"days": best["days"], "label": HOLD_LABEL.get(best["days"], f"{best['days']} zile"), "sure": best["sure"],
+            "no_edge": not with_edge, "per_horizon": rows}
+    if daily_vol and daily_vol > 0:
+        w = daily_vol * best["days"] ** 0.5
+        up, down = price * math.exp(w), price * math.exp(-w)
+        plan["take_profit"], plan["stop_loss"] = (up, down) if action == "BUY" else (down, up)
+    return plan
+
+
 def base_decision(
     est: dict[str, Any] | None,
     rule: str,
@@ -128,7 +158,7 @@ def base_decision(
             if abs(value) >= 0.005 or source == "regulile":
                 d.action = "BUY" if value >= 0 else "SELL"
                 d.why.append(f"statistica nu arată un avantaj ({_pct(est['p'])}, interval {interval}); "
-                             f"direcția o dă {source}; fără poziție")
+                             f"direcția o {'dau' if source == 'regulile' else 'dă'} {source}; fără poziție")
                 break
         if abs(composite) >= STRONG_RULE:
             d.ask.append(f"regulile dau un semnal puternic ({composite:+.0f}), dar statistica nu arată niciun avantaj ({interval})")

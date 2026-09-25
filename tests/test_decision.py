@@ -1,3 +1,4 @@
+import math
 from types import SimpleNamespace
 
 import pytest
@@ -124,3 +125,24 @@ def test_track_record_gate(tmp_path):
     track._write(path, rows)
     assert track.claude_worse(path) is True
     assert track.claude_worse(path, min_n=100) is False
+
+
+def test_holding_plan_picks_the_best_horizon_for_the_direction():
+    from stockai.decision import holding_plan
+
+    per_h = {5: est(0.53, 0.50, 0.56, base=0.53), 20: est(0.62, 0.59, 0.65, base=0.55),
+             60: est(0.68, 0.62, 0.74, base=0.60)}
+    plan = holding_plan(per_h, "BUY", 100.0, 0.02, helps={5: False, 20: True, 60: True})
+    # 7pp în 20 de zile bate 8pp în 60 de zile (avantajul raportat la timp)
+    assert plan["days"] == 20 and plan["label"] == "o lună" and plan["sure"]
+    assert plan["take_profit"] > 100 > plan["stop_loss"]
+    assert abs(plan["take_profit"] - 100 * math.exp(0.02 * 20 ** 0.5)) < 1e-9
+    assert not plan["no_edge"]
+    down = holding_plan(per_h, "SELL", 100.0, 0.02)
+    # pentru SELL niciun orizont nu arată un avantaj: rămâne orizontul standard, o lună
+    assert down["days"] == 20 and down["no_edge"] and not down["sure"]
+    assert down["take_profit"] < 100 < down["stop_loss"]
+    falls = holding_plan({5: est(0.49, 0.47, 0.51, base=0.53), 20: est(0.54, 0.51, 0.57, base=0.55)}, "SELL", 100.0, 0.02)
+    assert falls["days"] == 5 and not falls["no_edge"]
+    assert holding_plan({20: per_h[20]}, "BUY", 100.0, 0.02) is None
+    assert "take_profit" not in holding_plan(per_h, "BUY", 100.0, None)

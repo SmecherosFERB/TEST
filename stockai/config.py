@@ -43,6 +43,12 @@ class Settings:
     beat_model_path: str = field(default_factory=lambda: os.getenv("STOCKAI_MODEL_BEAT", ".cache/model_beat.pkl"))
     # Al treilea: trade-ul cu țintă și stop (python -m stockai --train --target trade).
     trade_model_path: str = field(default_factory=lambda: os.getenv("STOCKAI_MODEL_TRADE", ".cache/model_trade.pkl"))
+    # Modelele pentru „cât să ții” (python -m stockai --train --all-horizons): unul pe fiecare orizont, în zile de bursă.
+    hold_horizons: tuple[int, ...] = (5, 10, 20, 40, 60)
+    hold_model_dir: str = field(default_factory=lambda: os.getenv("STOCKAI_MODEL_DIR", ".cache"))
+
+    def hold_model_path(self, horizon: int) -> str:
+        return os.path.join(self.hold_model_dir, f"model_h{horizon}.pkl")
 
     claude_model: str = field(default_factory=lambda: os.getenv("CLAUDE_MODEL", "claude-opus-5"))
     claude_effort: str = field(default_factory=lambda: os.getenv("CLAUDE_EFFORT", "high"))

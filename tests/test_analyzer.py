@@ -174,3 +174,28 @@ def test_calibrated_models_drive_the_estimate_and_upcoming_earnings_is_reported(
     assert ctx["statistical_model_beat_sp500"]["interval_90"] is not None
     assert rec.extras["quality"]["score"] >= 50 and ctx["data_quality"]["grade"] == rec.extras["quality"]["grade"]
     assert "checks" not in ctx["data_quality"]
+
+
+def test_holding_period_comes_from_the_horizon_models():
+    import pandas as pd
+
+    from stockai.__main__ import render
+    from stockai.model import ProbabilityModel, build_dataset, walk_forward
+
+    from .conftest import RichFakeData
+    from .test_model import momentum_world
+
+    world, market = momentum_world(n_stocks=8, n_days=2600)
+    hold = {}
+    for h in (5, 20, 60):
+        data = build_dataset(world, market, horizon=h)
+        m = ProbabilityModel(h).fit(data)
+        m.calibration = walk_forward(data, horizon=h).recalibration
+        hold[h] = m
+    rec = Analyzer(RichFakeData(world["S0"], market=pd.DataFrame({"Close": market})), claude_mode="never",
+                   model=hold[20], hold_models=hold).analyze("S0")
+    plan = rec.extras["holding"]
+    assert plan["days"] in (5, 20, 60) and len(plan["per_horizon"]) == 3
+    assert rec.decision in ("BUY", "SELL")
+    assert (plan["take_profit"] > rec.price) == (rec.decision == "BUY")
+    assert "Cât să ții:" in render(rec)

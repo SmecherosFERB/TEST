@@ -79,8 +79,15 @@ Mai multe surse nu înseamnă automat predicții mai bune. Ce contează:
 6. **Metode, nu doar semnale.**
    - *trade cu trei bariere* (López de Prado): în loc de „crește sau nu”, modelul „Trade” estimează șansa ca ținta
      (+1 abatere tipică pe 4 săptămâni) să fie atinsă înaintea stopului (−1 abatere), cu intrare la închiderea de a doua
-     zi. Același model e folosit ca al doilea filtru al deciziei („meta-labeling”): un BUY pe care trade-ul îl contrazice
-     sigur devine HOLD;
+     zi. Același model e folosit ca al doilea filtru al deciziei („meta-labeling”): când trade-ul contrazice sigur
+     direcția, convingerea (și deci poziția) scade un nivel; când o confirmă, crește;
+   - *mărimea poziției după risc* (volatility targeting, Moreira și Muir, 2017): poziția e invers proporțională cu
+     volatilitatea acțiunii, ca o mișcare tipică împotriva ta să coste mereu cam același procent din portofoliu;
+   - *cât să ții* (Jegadeesh și Titman, 1993, au comparat perioade de deținere de 3 până la 12 luni; efectul de revenire
+     pe termen scurt ține o săptămână–o lună): câte un model pe 1, 2, 4, 8 și 12 săptămâni, iar orizontul ales e cel cu
+     avantajul cel mai mare raportat la timp;
+   - *testul de profit după costuri*: portofoliul lunar cu cele mai bune 20% acțiuni după model, comparat cu S&P 500,
+     și varianta long–short, doar pe ani nevăzuți;
    - *combinarea prognozelor* (Rapach, Strauss și Zhou, 2010): prognoza finală e jumătate modelul complet, jumătate
      media modelelor cu câte un singur semnal. Pe date simulate, varianta combinată a dat mai multe BUY-uri corecte cu
      aceeași precizie, și zero alarme false pe zgomot; doar modelele simple au dat 390 de BUY-uri greșite.

@@ -202,6 +202,11 @@ def build_dataset(
         f = feature_frame(px, market_close, (earnings or {}).get(ticker))
         close = px["Close"]
         fwd = close.shift(-(horizon + 1)) / close.shift(-1) - 1
+        if market_close is not None:
+            m_all = market_close.reindex(close.index, method="ffill")
+            mkt_fwd = (m_all.shift(-(horizon + 1)) / m_all.shift(-1) - 1).fillna(0.0)
+        else:
+            mkt_fwd = pd.Series(0.0, index=close.index)
         if target == "beat":
             m = market_close.reindex(close.index, method="ffill")
             mfwd = m.shift(-(horizon + 1)) / m.shift(-1) - 1
@@ -211,6 +216,8 @@ def build_dataset(
             f["label"] = trade_labels(close, width, horizon)
         else:
             f["label"] = (fwd > 0).astype(float).where(fwd.notna())
+        # Randamentele de după intrare, pentru testul de profit (nu intră în model).
+        f["fwd_ret"], f["mkt_ret"] = fwd, mkt_fwd
         if quality.suspect:
             bad = excluded_rows(close.index, quality.suspect, horizon=horizon)
             dropped += int(bad.sum())
@@ -310,12 +317,12 @@ def fit_calibration(p: np.ndarray, y: np.ndarray, groups: np.ndarray, overlap: f
 
 def decision_backtest(p: np.ndarray, y: np.ndarray, months: np.ndarray, overlap: float = 1.0) -> dict[str, int]:
     """Regula de decizie testată fără privit înainte: pentru fiecare an, recalibrarea și rata „de obicei” vin doar din
-    anii de test anteriori. BUY dacă tot intervalul de 90% e peste medie, SELL dacă e tot sub, altfel HOLD."""
+    anii de test anteriori. BUY dacă tot intervalul de 90% e peste medie, SELL dacă e tot sub, altfel nicio poziție."""
     years = np.array([m[:4] for m in months])
     # Media lunii respective, ca un BUY dat într-o lună bună pentru toată piața să nu pară talent.
     month_mean = pd.Series(y).groupby(months).transform("mean").to_numpy()
     out = {"buy": 0, "buy_hit": 0, "buy_same_month": 0.0, "sell": 0, "sell_hit": 0, "sell_same_month": 0.0,
-           "hold": 0, "total": 0, "up": 0}
+           "no_position": 0, "total": 0, "up": 0}
     for year in sorted(set(years))[1:]:
         past, now = years < year, years == year
         if past.sum() < 200:
@@ -333,10 +340,42 @@ def decision_backtest(p: np.ndarray, y: np.ndarray, months: np.ndarray, overlap:
         out["sell"] += int(sell.sum())
         out["sell_hit"] += int((1 - yy[sell]).sum())
         out["sell_same_month"] += float((1 - mm[sell]).sum())
-        out["hold"] += int((~buy & ~sell).sum())
+        out["no_position"] += int((~buy & ~sell).sum())
         out["total"] += int(len(yy))
         out["up"] += int(yy.sum())
     return out
+
+
+COST_LONG, COST_LS = 0.002, 0.004
+
+
+def strategy_backtest(p: np.ndarray, fwd: np.ndarray, mkt: np.ndarray, months: np.ndarray) -> dict[str, Any] | None:
+    """Testul de profit, ca la o firmă de trading: în fiecare lună din anii nevăzuți cumpără cele mai bune 20% acțiuni
+    după model (predicții făcute doar din anii dinainte), cu 0,2% costuri pe lună; comparat cu S&P 500 și cu long–short
+    (cele mai bune minus cele mai slabe 20%, 0,4% costuri). Lista conține companiile mari de azi: randamentul absolut e
+    prea optimist, diferența față de S&P 500 și long–short sunt măsurile mai cinstite."""
+    frame = pd.DataFrame({"p": p, "r": fwd, "m": mkt, "month": months}).dropna()
+    rows = []
+    for month, grp in frame.groupby("month", sort=True):
+        if len(grp) < 10:
+            continue
+        q = max(2, len(grp) // 5)
+        ranked = grp.sort_values("p", ascending=False)
+        top, bottom = ranked.head(q), ranked.tail(q)
+        rows.append({"month": month, "long": top["r"].mean() - COST_LONG, "spx": grp["m"].mean(),
+                     "ls": top["r"].mean() - bottom["r"].mean() - COST_LS})
+    if len(rows) < 24:
+        return None
+    res = pd.DataFrame(rows)
+
+    def stats(x: pd.Series) -> dict[str, float]:
+        curve = (1 + x).cumprod()
+        sd = float(x.std(ddof=0))
+        return {"annual": float(curve.iloc[-1] ** (12 / len(x)) - 1), "sharpe": float(x.mean() / sd * np.sqrt(12)) if sd else 0.0,
+                "max_drawdown": float((curve / curve.cummax() - 1).min())}
+
+    return {"months": len(res), "long": stats(res["long"]), "spx": stats(res["spx"]), "ls": stats(res["ls"]),
+            "beat_rate": float((res["long"] > res["spx"]).mean())}
 
 
 class ProbabilityModel:
@@ -424,6 +463,7 @@ class BacktestReport:
     overall_up: float = float("nan")
     recalibration: Calibration | None = None
     decisions: dict[str, int] = field(default_factory=dict)  # testul regulii de decizie, vezi decision_backtest
+    strategy: dict[str, Any] | None = None  # testul de profit, vezi strategy_backtest
 
     @property
     def skill(self) -> float:
@@ -466,6 +506,14 @@ class BacktestReport:
         lines.append("  Calibrare brută (probabilitate prezisă → cât de des s-a întâmplat):")
         for c in self.calibration:
             lines.append(f"    {c['predicted']:.1%} → {c['actual']:.1%}  (n={c['n']})")
+        st = self.strategy
+        if st:
+            lines.append(
+                f"  Test de profit, după costuri (cumpărând lunar cele mai bune 20%): {st['long']['annual']:+.1%} pe an"
+                f" (Sharpe {st['long']['sharpe']:.2f}, scădere maximă {st['long']['max_drawdown']:.1%}), față de S&P 500"
+                f" {st['spx']['annual']:+.1%} (Sharpe {st['spx']['sharpe']:.2f}); long–short {st['ls']['annual']:+.1%}"
+                f" (Sharpe {st['ls']['sharpe']:.2f}); a bătut S&P 500 în {st['beat_rate']:.0%} din luni."
+            )
         lines.append("  Pe ani:")
         for y in self.years:
             lines.append(
@@ -480,7 +528,7 @@ def walk_forward(data: pd.DataFrame, horizon: int = 20, min_train_years: int = 3
     data = data.sort_values("date").reset_index(drop=True)
     years = sorted(pd.DatetimeIndex(data["date"]).year.unique())
     report = BacktestReport(horizon=horizon, target=target)
-    preds, labels, bases, months = [], [], [], []
+    preds, labels, bases, months, rets, mkts = [], [], [], [], [], []
     for year in years[min_train_years:]:
         # Eliminăm ultimele zile dinaintea anului testat: etichetele lor depind de prețuri din anul testat.
         cutoff = pd.Timestamp(f"{year}-01-01") - pd.Timedelta(days=int(horizon * 1.6) + 3)
@@ -506,6 +554,9 @@ def walk_forward(data: pd.DataFrame, horizon: int = 20, min_train_years: int = 3
         labels.append(y)
         bases.append(base)
         months.append(pd.DatetimeIndex(test["date"]).strftime("%Y-%m").to_numpy())
+        if "fwd_ret" in test:
+            rets.append(test["fwd_ret"].to_numpy())
+            mkts.append(test["mkt_ret"].to_numpy())
     if not preds:
         raise ValueError("Prea puțini ani de date pentru un test walk-forward")
     p, y, b, g = np.concatenate(preds), np.concatenate(labels), np.concatenate(bases), np.concatenate(months)
@@ -516,6 +567,8 @@ def walk_forward(data: pd.DataFrame, horizon: int = 20, min_train_years: int = 3
     report.overall_up = float(y.mean())
     report.recalibration = fit_calibration(p, y, g, overlap)
     report.decisions = decision_backtest(p, y, g, overlap)
+    if rets and horizon == 20 and target in ("up", "beat"):
+        report.strategy = strategy_backtest(p, np.concatenate(rets), np.concatenate(mkts), g)
     edges = np.quantile(p, np.linspace(0, 1, 11))
     bins = np.clip(np.searchsorted(edges, p, side="right") - 1, 0, 9)
     for k in range(10):

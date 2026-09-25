@@ -54,6 +54,12 @@ def render(rec: Recommendation) -> str:
     ]
     if rec.final and rec.final.why:
         lines.append("De ce: " + "; ".join(rec.final.why))
+    if rec.extras.get("holding"):
+        h = rec.extras["holding"]
+        exit_text = (f" · ieși mai devreme la ținta {h['take_profit']:.2f} sau la stopul {h['stop_loss']:.2f}"
+                     if "take_profit" in h else "")
+        lines.append(f"Cât să ții: {h['label']} ({h['days']} zile de bursă){exit_text}"
+                     + (" · niciun orizont nu arată un avantaj" if h.get("no_edge") else "" if h["sure"] else " · estimare slabă"))
     lines.append("Scoruri: " + " · ".join(f"{label} {fmt_score(s.get(key))}" for key, label in SCORE_LABELS))
     trade_what = (f"șanse ca ținta ({rec.model_trade['take_profit']:.2f}) să fie atinsă înaintea stopului"
                   f" ({rec.model_trade['stop_loss']:.2f})" if rec.model_trade and "take_profit" in rec.model_trade else "")
@@ -128,7 +134,7 @@ def render(rec: Recommendation) -> str:
     return "\n".join(lines)
 
 
-def train(tickers: list[str], settings: Settings, with_earnings: bool, target: str = "up") -> int:
+def train(tickers: list[str], settings: Settings, with_earnings: bool, target: str = "up", path: str | None = None) -> int:
     from .model import ProbabilityModel, build_dataset, walk_forward
 
     md = MarketData()
@@ -158,7 +164,7 @@ def train(tickers: list[str], settings: Settings, with_earnings: bool, target: s
     model = ProbabilityModel(settings.horizon_days, target).fit(data)
     # Probabilitățile afișate sunt recalibrate pe rezultatele din anii nevăzuți.
     model.calibration = report.recalibration
-    path = {"beat": settings.beat_model_path, "trade": settings.trade_model_path}.get(target, settings.model_path)
+    path = path or {"beat": settings.beat_model_path, "trade": settings.trade_model_path}.get(target, settings.model_path)
     model.save(path)
     print(f"\nModel salvat în {path} ({model.info['rows']} rânduri, {model.info['tickers']} acțiuni,"
           f" {model.info['from']} → {model.info['to']}).")
@@ -201,7 +207,7 @@ def load_model(path: str):
 
 def main(argv: list[str] | None = None) -> int:
     load_dotenv()
-    parser = argparse.ArgumentParser(prog="stockai", description="Semnale BUY/SELL/HOLD pentru acțiuni")
+    parser = argparse.ArgumentParser(prog="stockai", description="Decizii BUY/SELL pentru acțiuni, cu poziție și cât să ții")
     parser.add_argument("tickers", nargs="*", help="simboluri, ex. AAPL MSFT NVDA")
     parser.add_argument("--horizon", type=int, default=20, help="orizontul în zile de tranzacționare")
     mode = parser.add_mutually_exclusive_group()
@@ -214,6 +220,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--target", choices=["up", "beat", "trade"], default="up",
                         help="la --train: up = prețul crește (implicit), beat = acțiunea bate S&P 500,"
                              " trade = ținta (+1 abatere tipică) e atinsă înaintea stopului")
+    parser.add_argument("--all-horizons", action="store_true",
+                        help="la --train: modelele pentru „cât să ții” (o săptămână, două săptămâni, o lună, două luni, trei luni)")
     parser.add_argument("--with-earnings", action="store_true",
                         help="la --train: include surprizele la rezultate (o cerere Alpha Vantage pe acțiune)")
     parser.add_argument("--evaluate", action="store_true",
@@ -226,7 +234,15 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.train:
         tickers = [t.upper() for t in args.tickers] or [s["ticker"] for s in load_universe() if s["sector"] != "ETF"]
-        return train(tickers[: args.limit] if args.limit else tickers, settings, args.with_earnings, args.target)
+        chosen = tickers[: args.limit] if args.limit else tickers
+        if args.all_horizons:
+            for h in settings.hold_horizons:
+                print(f"\n=== Orizont {h} zile ===")
+                code = train(chosen, Settings(horizon_days=h), args.with_earnings, "up", path=settings.hold_model_path(h))
+                if code:
+                    return code
+            return 0
+        return train(chosen, settings, args.with_earnings, args.target)
     if args.evaluate:
         from . import track
 
@@ -247,13 +263,15 @@ def main(argv: list[str] | None = None) -> int:
             print("Notă: ANTHROPIC_API_KEY lipsește, rulez doar pe reguli.", file=sys.stderr)
     model, beat_model = load_model(settings.model_path), load_model(settings.beat_model_path)
     trade_model = load_model(settings.trade_model_path)
+    hold_models = {h: m for h in settings.hold_horizons if (m := load_model(settings.hold_model_path(h))) is not None}
     if model is None:
         print("Notă: modelul de probabilitate nu e antrenat încă (python -m stockai --train).", file=sys.stderr)
 
     from . import track
 
     analyzer = Analyzer(MarketData(), settings=settings, advisor=advisor, claude_mode=claude_mode,
-                        model=model, beat_model=beat_model, claude_worse=track.claude_worse(), trade_model=trade_model)
+                        model=model, beat_model=beat_model, claude_worse=track.claude_worse(), trade_model=trade_model,
+                        hold_models=hold_models)
     results, failed = [], False
     for ticker in args.tickers:
         try:
